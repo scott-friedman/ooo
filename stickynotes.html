@@ -37,7 +37,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Patrick+Hand&family=Permanent+Marker&display=swap" rel="stylesheet">
 </head>
 <body>
-    <a href="#notes-container" class="skip-link">Skip to main content</a>
+    <a href="#add-note-btn" class="skip-link">Skip to main content</a>
 
     <!-- Status announcer for screen readers -->
     <div id="status-announcer" aria-live="polite" class="visually-hidden"></div>
@@ -80,7 +80,7 @@
     </div>
 
     <!-- Sticky Notes Container -->
-    <div id="notes-container"></div>
+    <div id="notes-container" role="list" aria-label="Sticky notes board"></div>
 
     <!-- Add Note Button -->
     <button id="add-note-btn" class="add-note-btn" title="Add a sticky note">
@@ -99,6 +99,9 @@
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <!-- Auth SDK: restores the admin session (signed in on admin.html, same origin)
+         so the owner's delete requests carry an auth token. (P0-2) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
 
     <script src="js/firebase-config.js"></script>
     <script src="js/main.js"></script>

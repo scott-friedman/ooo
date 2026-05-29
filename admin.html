@@ -420,12 +420,23 @@
                 </p>
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                     <button class="btn-small btn-delete" onclick="clearDrawings('index')">Clear Home</button>
-                    <button class="btn-small btn-delete" onclick="clearDrawings('stickynotes')">Clear Sticky Notes</button>
+                    <button class="btn-small btn-delete" onclick="clearDrawings('stickynotes')">Clear Drawings (Notes Page)</button>
                     <button class="btn-small btn-delete" onclick="clearDrawings('music')">Clear Music</button>
                     <button class="btn-small btn-delete" onclick="clearDrawings('commandcenter')">Clear Command Center</button>
                     <button class="btn-small btn-delete" onclick="clearAllDrawings()" style="background: #c45d3a; color: white;">Clear All Pages</button>
                 </div>
                 <span id="clear-drawings-status" class="status" style="display: block; margin-top: 0.5rem;"></span>
+            </div>
+
+            <div class="section">
+                <h2>Sticky Notes</h2>
+                <p style="color: #666; font-size: 0.85rem; margin-bottom: 1rem;">
+                    Remove every sticky note from the collaborative board. Drawings are separate &mdash; use &ldquo;Clear Drawings&rdquo; above for those.
+                </p>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button class="btn-small btn-delete" onclick="clearAllNotes()" style="background: #c45d3a; color: white;">Clear All Notes</button>
+                </div>
+                <span id="clear-notes-status" class="status" style="display: block; margin-top: 0.5rem;"></span>
             </div>
         </div>
     </div>
@@ -1300,6 +1311,29 @@ You can use HTML tags like:
             ])
                 .then(() => {
                     status.textContent = `Cleared drawings from ${pageId}!`;
+                    status.className = 'status success';
+                    setTimeout(() => { status.textContent = ''; }, 3000);
+                })
+                .catch(err => {
+                    status.textContent = 'Error: ' + err.message;
+                    status.className = 'status error';
+                });
+        }
+
+        // ==================== Clear Sticky Notes ====================
+
+        function clearAllNotes() {
+            if (!confirm('Delete ALL sticky notes from the board? This cannot be undone.')) return;
+
+            const status = document.getElementById('clear-notes-status');
+            status.textContent = 'Clearing...';
+            status.className = 'status';
+
+            // Removes the whole stickynotes node. Allowed by the parent-level
+            // admin clear rule (auth + admin + deletion only).
+            db.ref('stickynotes').remove()
+                .then(() => {
+                    status.textContent = 'All sticky notes cleared!';
                     status.className = 'status success';
                     setTimeout(() => { status.textContent = ''; }, 3000);
                 })

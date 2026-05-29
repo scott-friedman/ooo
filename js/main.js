@@ -369,6 +369,8 @@
     function startDrawing(e) {
         if (e.target !== canvas) return;
         if (isMobile && !drawModeActive) return;
+        // Don't start a stroke while the user is interacting with a sticky note (P2-1)
+        if (window.__stickyNoteInteracting) return;
 
         isDrawing = true;
         const pos = getPos(e);  // percentage coordinates
@@ -611,6 +613,8 @@
     }
 
     document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        // Let skip links use native behavior so focus moves to the target (A11y-6)
+        if (anchor.classList.contains('skip-link')) return;
         anchor.addEventListener('click', function(e) {
             e.preventDefault();
             const target = document.querySelector(this.getAttribute('href'));
