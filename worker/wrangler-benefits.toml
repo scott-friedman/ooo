@@ -5,5 +5,6 @@ name = "benefits-api"
 main = "benefits-proxy.js"
 compatibility_date = "2024-01-01"
 
-# After deploying, set secret via:
+# After deploying, set secrets via:
 # npx wrangler secret put GEMINI_API_KEY --config wrangler-benefits.toml
+# npx wrangler secret put FIREBASE_SECRET --config wrangler-benefits.toml   (RTDB database secret — needed for cache writes)

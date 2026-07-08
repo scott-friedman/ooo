@@ -8,7 +8,7 @@ compatibility_date = "2024-01-01"
 # After deploying, set these secrets via:
 # npx wrangler secret put HA_URL
 # npx wrangler secret put HA_TOKEN
-# npx wrangler secret put FIREBASE_URL
+# npx wrangler secret put FIREBASE_SECRET   (RTDB database secret — needed for activity-log writes)
 
 [vars]
 # Non-secret variables can go here
