@@ -16,7 +16,12 @@
  * Deploy: npx wrangler deploy --config wrangler-benefits.toml
  */
 
-const FIREBASE_URL = 'https://scottfriedman-f400d-default-rtdb.firebaseio.com';
+// Prefer the wrangler [vars] value (matches ha-proxy); constant is the fallback.
+const DEFAULT_FIREBASE_URL = 'https://scottfriedman-f400d-default-rtdb.firebaseio.com';
+
+function firebaseUrl(env) {
+    return env.FIREBASE_URL || DEFAULT_FIREBASE_URL;
+}
 
 // Model is configurable via wrangler [vars] GEMINI_MODEL without a code
 // change — Google retired gemini-2.0-flash in 2026 and the page broke
@@ -56,6 +61,18 @@ function getCorsHeaders(request) {
         'Access-Control-Max-Age': '86400',
     };
 }
+
+// Outbound fetch timeouts — without these a hung upstream holds the user's
+// spinner until Cloudflare kills the request. (PERF-4)
+const FIREBASE_TIMEOUT_MS = 10000;
+const GEMINI_TIMEOUT_MS = 30000;
+
+// Input caps applied before prompt assembly — these fields were previously
+// interpolated into Gemini prompts unbounded, a token-cost abuse vector. (SEC-8)
+const MAX_QUERY_LENGTH = 200;
+const MAX_BENEFIT_LENGTH = 300;
+const MAX_LIST_ITEMS = 20;
+const MAX_EXPANSION_LENGTH = 1200;
 
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
@@ -113,6 +130,24 @@ function checkRateLimit(ip, env) {
     }
 
     return { allowed: true };
+}
+
+/**
+ * Rate-limit gate shared by all POST handlers: returns a 429 Response if
+ * the caller is over a limit, or null to proceed.
+ */
+function rateLimitResponse(request, env, corsHeaders) {
+    const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const rateCheck = checkRateLimit(clientIP, env);
+    if (rateCheck.allowed) return null;
+    const messages = {
+        'daily_limit': 'Daily limit reached. Please try again tomorrow.',
+        'hour_limit': 'Hourly limit exceeded. Please try again later.',
+        'minute_limit': 'Rate limit exceeded. Please try again in a minute.'
+    };
+    return jsonResponse({
+        error: messages[rateCheck.reason] || 'Rate limit exceeded.'
+    }, 429, corsHeaders);
 }
 
 /**
@@ -196,19 +231,8 @@ export default {
  * Returns: { benefits: string[], usageTips: string[], query: string, cached: boolean }
  */
 async function handleBenefits(request, env, corsHeaders) {
-    // Rate limiting
-    const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const rateCheck = checkRateLimit(clientIP, env);
-    if (!rateCheck.allowed) {
-        const messages = {
-            'daily_limit': 'Daily limit reached. Please try again tomorrow.',
-            'hour_limit': 'Hourly limit exceeded. Please try again later.',
-            'minute_limit': 'Rate limit exceeded. Please try again in a minute.'
-        };
-        return jsonResponse({
-            error: messages[rateCheck.reason] || 'Rate limit exceeded.'
-        }, 429, corsHeaders);
-    }
+    const rateLimited = rateLimitResponse(request, env, corsHeaders);
+    if (rateLimited) return rateLimited;
 
     // Parse request
     let body;
@@ -237,7 +261,7 @@ async function handleBenefits(request, env, corsHeaders) {
 
     // Check Firebase cache first
     const cacheKey = queryToFirebaseKey(normalizedQuery);
-    const cached = await checkCache(cacheKey);
+    const cached = await checkCache(env, cacheKey);
 
     if (cached) {
         return jsonResponse({
@@ -274,19 +298,8 @@ async function handleBenefits(request, env, corsHeaders) {
  * Returns: { benefit: string }
  */
 async function handleMoreBenefit(request, env, corsHeaders) {
-    // Rate limiting
-    const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const rateCheck = checkRateLimit(clientIP, env);
-    if (!rateCheck.allowed) {
-        const messages = {
-            'daily_limit': 'Daily limit reached. Please try again tomorrow.',
-            'hour_limit': 'Hourly limit exceeded. Please try again later.',
-            'minute_limit': 'Rate limit exceeded. Please try again in a minute.'
-        };
-        return jsonResponse({
-            error: messages[rateCheck.reason] || 'Rate limit exceeded.'
-        }, 429, corsHeaders);
-    }
+    const rateLimited = rateLimitResponse(request, env, corsHeaders);
+    if (rateLimited) return rateLimited;
 
     let body;
     try {
@@ -297,8 +310,13 @@ async function handleMoreBenefit(request, env, corsHeaders) {
 
     const { query, existingBenefits } = body;
 
-    if (!query || !Array.isArray(existingBenefits)) {
+    if (!query || typeof query !== 'string' || !Array.isArray(existingBenefits)) {
         return jsonResponse({ error: 'Query and existingBenefits are required' }, 400, corsHeaders);
+    }
+
+    if (query.length > MAX_QUERY_LENGTH || existingBenefits.length > MAX_LIST_ITEMS ||
+        existingBenefits.some(b => typeof b !== 'string' || b.length > MAX_BENEFIT_LENGTH)) {
+        return jsonResponse({ error: 'Input too large' }, 400, corsHeaders);
     }
 
     const result = await callGeminiForMoreBenefit(env, query, existingBenefits);
@@ -316,19 +334,8 @@ async function handleMoreBenefit(request, env, corsHeaders) {
  * Returns: { expansion: string }
  */
 async function handleExpandBenefit(request, env, corsHeaders) {
-    // Rate limiting
-    const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const rateCheck = checkRateLimit(clientIP, env);
-    if (!rateCheck.allowed) {
-        const messages = {
-            'daily_limit': 'Daily limit reached. Please try again tomorrow.',
-            'hour_limit': 'Hourly limit exceeded. Please try again later.',
-            'minute_limit': 'Rate limit exceeded. Please try again in a minute.'
-        };
-        return jsonResponse({
-            error: messages[rateCheck.reason] || 'Rate limit exceeded.'
-        }, 429, corsHeaders);
-    }
+    const rateLimited = rateLimitResponse(request, env, corsHeaders);
+    if (rateLimited) return rateLimited;
 
     let body;
     try {
@@ -339,11 +346,18 @@ async function handleExpandBenefit(request, env, corsHeaders) {
 
     const { query, benefit, existingExpansions } = body;
 
-    if (!query || !benefit) {
+    if (!query || typeof query !== 'string' || !benefit || typeof benefit !== 'string') {
         return jsonResponse({ error: 'Query and benefit are required' }, 400, corsHeaders);
     }
 
-    const result = await callGeminiForExpansion(env, query, benefit, existingExpansions || []);
+    const expansions = existingExpansions || [];
+    if (query.length > MAX_QUERY_LENGTH || benefit.length > MAX_BENEFIT_LENGTH ||
+        !Array.isArray(expansions) || expansions.length > MAX_LIST_ITEMS ||
+        expansions.some(e => typeof e !== 'string' || e.length > MAX_EXPANSION_LENGTH)) {
+        return jsonResponse({ error: 'Input too large' }, 400, corsHeaders);
+    }
+
+    const result = await callGeminiForExpansion(env, query, benefit, expansions);
 
     if (result.error) {
         return jsonResponse({ error: result.error }, 500, corsHeaders);
@@ -355,10 +369,11 @@ async function handleExpandBenefit(request, env, corsHeaders) {
 /**
  * Check Firebase cache for existing result
  */
-async function checkCache(cacheKey) {
+async function checkCache(env, cacheKey) {
     try {
         const response = await fetch(
-            `${FIREBASE_URL}/benefits/cache/${cacheKey}.json`
+            `${firebaseUrl(env)}/benefits/cache/${cacheKey}.json`,
+            { signal: AbortSignal.timeout(FIREBASE_TIMEOUT_MS) }
         );
 
         if (!response.ok) return null;
@@ -377,9 +392,10 @@ async function checkCache(cacheKey) {
 async function saveToCache(env, cacheKey, result) {
     try {
         const response = await fetch(
-            `${FIREBASE_URL}/benefits/cache/${cacheKey}.json?auth=${env.FIREBASE_SECRET}`,
+            `${firebaseUrl(env)}/benefits/cache/${cacheKey}.json?auth=${env.FIREBASE_SECRET}`,
             {
                 method: 'PUT',
+                signal: AbortSignal.timeout(FIREBASE_TIMEOUT_MS),
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     benefits: result.benefits,
@@ -422,6 +438,7 @@ Return JSON only:
 
         const response = await fetch(`${geminiUrl(env)}?key=${env.GEMINI_API_KEY}`, {
             method: 'POST',
+            signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 contents: [{
@@ -505,6 +522,7 @@ Return ONLY the benefit text, nothing else.`;
 
         const response = await fetch(`${geminiUrl(env)}?key=${env.GEMINI_API_KEY}`, {
             method: 'POST',
+            signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 contents: [{ parts: [{ text: prompt }] }],
@@ -573,6 +591,7 @@ Do NOT pad simple claims with unnecessary elaboration. Match the depth of explan
 
         const response = await fetch(`${geminiUrl(env)}?key=${env.GEMINI_API_KEY}`, {
             method: 'POST',
+            signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 contents: [{ parts: [{ text: prompt }] }],

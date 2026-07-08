@@ -44,33 +44,45 @@ function getCorsHeaders(request) {
 // Allowed actions (whitelist)
 const ALLOWED_ACTIONS = ['turn_on', 'turn_off', 'set_percentage', 'media_play', 'media_pause'];
 
-// Rate limiting for control actions (prevent abuse)
+// Rate limiting (prevent abuse). Per-isolate in-memory — see SEC-5 for the
+// caveat; a KV-backed limiter is the real fix.
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const RATE_LIMIT_MAX_CONTROLS = 20; // 20 control actions per minute per IP
+const RATE_LIMIT_MAX_GETS = 60; // reads are cheaper but hit HA via Nabu Casa (SEC-6)
+
+// Outbound fetch timeout — a hung HA/Firebase upstream should fail the
+// request in 10s, not hang until Cloudflare kills it. (PERF-4)
+const FETCH_TIMEOUT_MS = 10000;
+
+// /api/state hits HA's full /api/states through Nabu Casa and the page polls
+// it every 30s per visitor — a short shared cache absorbs most of it. (SEC-6)
+const STATE_CACHE_MS = 15000;
+let stateCache = { body: null, timestamp: 0 };
 
 /**
- * Check rate limit for control actions
+ * Check rate limit, keyed by IP + limit class
  */
-function checkRateLimit(ip) {
+function checkRateLimit(ip, maxPerWindow = RATE_LIMIT_MAX_CONTROLS) {
     const now = Date.now();
-    const entry = rateLimitMap.get(ip);
+    const key = `${ip}:${maxPerWindow}`;
+    const entry = rateLimitMap.get(key);
 
     // Cleanup old entries periodically
     if (rateLimitMap.size > 1000) {
-        for (const [key, val] of rateLimitMap.entries()) {
+        for (const [k, val] of rateLimitMap.entries()) {
             if (now - val.timestamp > RATE_LIMIT_WINDOW * 2) {
-                rateLimitMap.delete(key);
+                rateLimitMap.delete(k);
             }
         }
     }
 
     if (!entry || now - entry.timestamp > RATE_LIMIT_WINDOW) {
-        rateLimitMap.set(ip, { count: 1, timestamp: now });
+        rateLimitMap.set(key, { count: 1, timestamp: now });
         return true;
     }
 
-    if (entry.count >= RATE_LIMIT_MAX_CONTROLS) {
+    if (entry.count >= maxPerWindow) {
         return false;
     }
 
@@ -91,6 +103,16 @@ export default {
         const path = url.pathname;
 
         try {
+            // GET routes were previously unthrottled; each one reaches
+            // Firebase and/or HA over Nabu Casa. (SEC-6)
+            const isGet = ['/api/status', '/api/state', '/api/devices'].includes(path);
+            if (isGet) {
+                const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (!checkRateLimit(clientIP, RATE_LIMIT_MAX_GETS)) {
+                    return jsonResponse({ error: 'Rate limit exceeded. Please slow down.' }, 429, corsHeaders);
+                }
+            }
+
             // Route handling
             if (path === '/api/status') {
                 return await handleStatus(env, corsHeaders);
@@ -122,7 +144,8 @@ export default {
 async function checkEnabled(env) {
     try {
         const response = await fetch(
-            `${env.FIREBASE_URL}/commandcenter/enabled.json`
+            `${env.FIREBASE_URL}/commandcenter/enabled.json`,
+            { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
         );
         const enabled = await response.json();
         return enabled === true;
@@ -140,7 +163,8 @@ async function checkEnabled(env) {
 async function getAllowedDevices(env) {
     try {
         const response = await fetch(
-            `${env.FIREBASE_URL}/commandcenter/devices.json`
+            `${env.FIREBASE_URL}/commandcenter/devices.json`,
+            { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
         );
         const rawDevices = await response.json();
         if (!rawDevices) return {};
@@ -176,6 +200,7 @@ async function logAction(env, entityId, action, deviceName) {
             `${env.FIREBASE_URL}/commandcenter/log.json?auth=${env.FIREBASE_SECRET}`,
             {
                 method: 'POST',
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     entity_id: entityId,
@@ -213,6 +238,12 @@ async function handleGetDevices(env, corsHeaders) {
  * GET /api/state - Get current state of all allowed devices
  */
 async function handleGetState(env, corsHeaders) {
+    // Serve from the short-lived cache when fresh — the page polls this
+    // every 30s per visitor. (SEC-6)
+    if (stateCache.body && Date.now() - stateCache.timestamp < STATE_CACHE_MS) {
+        return jsonResponse(stateCache.body, 200, corsHeaders);
+    }
+
     const devices = await getAllowedDevices(env);
     const entityIds = Object.keys(devices);
 
@@ -225,6 +256,7 @@ async function handleGetState(env, corsHeaders) {
         const response = await fetch(
             `${env.HA_URL}/api/states`,
             {
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
                 headers: {
                     'Authorization': `Bearer ${env.HA_TOKEN}`,
                     'Content-Type': 'application/json'
@@ -299,6 +331,7 @@ async function handleGetState(env, corsHeaders) {
             }
         }
 
+        stateCache = { body: { states }, timestamp: Date.now() };
         return jsonResponse({ states }, 200, corsHeaders);
     } catch (error) {
         console.error('Failed to get HA states:', error);
@@ -378,6 +411,7 @@ async function handleControl(request, env, corsHeaders) {
             `${env.HA_URL}/api/services/${entityType}/${action}`,
             {
                 method: 'POST',
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
                 headers: {
                     'Authorization': `Bearer ${env.HA_TOKEN}`,
                     'Content-Type': 'application/json'

@@ -3,7 +3,7 @@
 
 name = "benefits-api"
 main = "benefits-proxy.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2026-07-01"
 
 # After deploying, set secrets via:
 # npx wrangler secret put GEMINI_API_KEY --config wrangler-benefits.toml
@@ -12,3 +12,4 @@ compatibility_date = "2024-01-01"
 [vars]
 # Bump here when Google retires the model (gemini-2.0-flash died mid-2026)
 GEMINI_MODEL = "gemini-2.5-flash"
+FIREBASE_URL = "https://scottfriedman-f400d-default-rtdb.firebaseio.com"
