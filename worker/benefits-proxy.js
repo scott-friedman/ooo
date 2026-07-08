@@ -18,6 +18,16 @@
 
 const FIREBASE_URL = 'https://scottfriedman-f400d-default-rtdb.firebaseio.com';
 
+// Model is configurable via wrangler [vars] GEMINI_MODEL without a code
+// change — Google retired gemini-2.0-flash in 2026 and the page broke
+// with a generic error until the pin was bumped.
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+
+function geminiUrl(env) {
+    const model = env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+    return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
+
 // Environment detection
 const IS_PRODUCTION = true; // Set to false for local development
 
@@ -390,8 +400,6 @@ async function saveToCache(env, cacheKey, result) {
  * Call Gemini API to generate benefits
  */
 async function callGemini(env, query) {
-    const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
     const prompt = `List benefits of "${query}".
 
 Rules:
@@ -412,7 +420,7 @@ Return JSON only:
         incrementDailyCounter();
         cleanupRateLimits();
 
-        const response = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
+        const response = await fetch(`${geminiUrl(env)}?key=${env.GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -422,6 +430,7 @@ Return JSON only:
                 generationConfig: {
                     temperature: 0.7,
                     maxOutputTokens: 1024,
+                    thinkingConfig: { thinkingBudget: 0 },
                     topP: 0.9
                 },
                 safetySettings: [
@@ -480,8 +489,6 @@ Return JSON only:
  * Call Gemini to get one more benefit
  */
 async function callGeminiForMoreBenefit(env, query, existingBenefits) {
-    const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
     const prompt = `For "${query}", give me ONE more benefit that is different from these existing ones:
 ${existingBenefits.map((b, i) => `${i + 1}. ${b}`).join('\n')}
 
@@ -496,7 +503,7 @@ Return ONLY the benefit text, nothing else.`;
         // Track API call for daily budget
         incrementDailyCounter();
 
-        const response = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
+        const response = await fetch(`${geminiUrl(env)}?key=${env.GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -504,6 +511,7 @@ Return ONLY the benefit text, nothing else.`;
                 generationConfig: {
                     temperature: 0.8,
                     maxOutputTokens: 100,
+                    thinkingConfig: { thinkingBudget: 0 },
                     topP: 0.9
                 },
                 safetySettings: [
@@ -538,8 +546,6 @@ Return ONLY the benefit text, nothing else.`;
  * Call Gemini to expand on a benefit claim
  */
 async function callGeminiForExpansion(env, query, benefit, existingExpansions = []) {
-    const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
     let avoidRepetitionClause = '';
     if (existingExpansions.length > 0) {
         avoidRepetitionClause = `
@@ -565,7 +571,7 @@ Do NOT pad simple claims with unnecessary elaboration. Match the depth of explan
         // Track API call for daily budget
         incrementDailyCounter();
 
-        const response = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
+        const response = await fetch(`${geminiUrl(env)}?key=${env.GEMINI_API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -573,6 +579,7 @@ Do NOT pad simple claims with unnecessary elaboration. Match the depth of explan
                 generationConfig: {
                     temperature: 0.7,
                     maxOutputTokens: 200,
+                    thinkingConfig: { thinkingBudget: 0 },
                     topP: 0.9
                 },
                 safetySettings: [
