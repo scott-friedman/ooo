@@ -72,6 +72,24 @@ function parseTLine(line) {
     };
 }
 
+/**
+ * "Lat Pulldown → DB Row — 40 lb DBs — 3×12" → {for, name, weight, reps},
+ * or null. `for` is the T3 row the alternate replaces when its equipment
+ * is taken (the pipeline's `Alt (if taken):` line, one segment per T3).
+ */
+function parseAltSegment(s) {
+    const m = s.trim().match(/^(.+?)\s+→\s+(.+)$/);
+    if (!m) return null;
+    const parts = m[2].split(' — ');
+    if (parts.length < 3) return null;
+    return {
+        for: m[1],
+        name: parts[0],
+        weight: parts.slice(1, -1).join(' — '),
+        reps: parts[parts.length - 1],
+    };
+}
+
 /** "Decline Push Up 5×3–5+AMRAP" → {name, rx}; unmatched stays name-only. */
 function parseBwSegment(s) {
     s = s.trim();
@@ -87,7 +105,7 @@ function parseBwSegment(s) {
 function parseDescription(desc) {
     const out = {
         warmup: null, exercises: [], plates: null,
-        bw: null, sauna: null, notes: [], prose: [],
+        alts: [], bw: null, sauna: null, notes: [], prose: [],
     };
     if (!desc) return out;
 
@@ -103,6 +121,10 @@ function parseDescription(desc) {
         const ex = parseTLine(t);
         if (ex) { out.exercises.push(ex); continue; }
         if ((m = t.match(/^Plates\s*·\s*(.+)$/))) { out.plates = m[1].split(' · '); continue; }
+        if ((m = t.match(/^Alt \(if taken\):\s*(.+)$/))) {
+            out.alts = m[1].split(' · ').map(parseAltSegment).filter(Boolean);
+            continue;
+        }
         if ((m = t.match(/^BW swap \(home\):\s*(.+)$/))) {
             // Compound segments ("KB Swing 5×10 + Glute Bridge 3×10") split into rows.
             out.bw = m[1].split(' · ')
@@ -148,17 +170,46 @@ function formatDay(dateStr) {
     return days[dt.getDay()] + ' ' + months[dt.getMonth()] + ' ' + dt.getDate();
 }
 
-function renderExerciseRow(ex) {
+function renderExerciseRow(ex, alt) {
     const li = el('li', 'ex-row');
     li.appendChild(el('span', 'tier tier-' + ex.tier.toLowerCase(), ex.tier));
     const body = el('div', 'ex');
-    body.appendChild(el('span', 'ex-name', ex.name));
+
+    const primary = el('div', 'ex-variant ex-primary');
+    primary.appendChild(el('span', 'ex-name', ex.name));
     const line2 = el('span', 'ex-line2');
     line2.appendChild(el('b', 'ex-weight', ex.weight));
     line2.appendChild(el('span', 'ex-reps', ex.reps));
     const kind = tagKind(ex.tag);
     if (kind) line2.appendChild(el('span', 'tag tag-' + kind, ex.tag));
-    body.appendChild(line2);
+    primary.appendChild(line2);
+    body.appendChild(primary);
+
+    if (alt) {
+        // Equipment-taken alternate: hidden until the alt button toggles it in.
+        const altBox = el('div', 'ex-variant ex-alt');
+        altBox.appendChild(el('span', 'ex-name', alt.name));
+        const altLine2 = el('span', 'ex-line2');
+        altLine2.appendChild(el('b', 'ex-weight', alt.weight));
+        altLine2.appendChild(el('span', 'ex-reps', alt.reps));
+        altLine2.appendChild(el('span', 'tag tag-alt', 'alt'));
+        altBox.appendChild(altLine2);
+        body.appendChild(altBox);
+
+        const btn = el('button', 'alt-btn', '⇄ alt');
+        btn.type = 'button';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.title = 'Equipment taken? Swap to ' + alt.name;
+        btn.addEventListener('click', () => {
+            const on = li.classList.toggle('show-alt');
+            btn.setAttribute('aria-pressed', String(on));
+            btn.textContent = on ? '⇄ back' : '⇄ alt';
+        });
+        li.appendChild(body);
+        li.appendChild(btn);
+        return li;
+    }
+
     li.appendChild(body);
     return li;
 }
@@ -200,8 +251,9 @@ function renderDayBody(evt, cls, parsed, isToday) {
         body.appendChild(w);
     }
     if (parsed.exercises.length) {
+        const altFor = new Map((parsed.alts || []).map((a) => [a.for, a]));
         const ul = el('ul', 'exercise-list' + gymOnly);
-        for (const ex of parsed.exercises) ul.appendChild(renderExerciseRow(ex));
+        for (const ex of parsed.exercises) ul.appendChild(renderExerciseRow(ex, altFor.get(ex.name)));
         body.appendChild(ul);
     }
     for (const p of parsed.prose) {
@@ -415,7 +467,7 @@ function init() {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         classifySummary, displayTitle, parseWeightTag, parseTLine,
-        parseBwSegment, parseDescription, tagKind,
+        parseAltSegment, parseBwSegment, parseDescription, tagKind,
     };
 }
 

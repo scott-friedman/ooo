@@ -348,6 +348,35 @@ details.day-card[open] {
 .tag-up { color: var(--accent); }
 .tag-retry { color: var(--warm); }
 .tag-tbd { border-style: dashed; color: var(--gray-light); }
+.tag-alt { border-style: dashed; color: var(--warm); }
+
+/* ─── Equipment-taken alternates (per-row ⇄ alt toggle) ──────────── */
+
+.ex-alt { display: none; }
+
+.ex-row.show-alt .ex-primary { display: none; }
+.ex-row.show-alt .ex-alt { display: block; }
+
+.alt-btn {
+    flex: 0 0 auto;
+    align-self: center;
+    min-height: 36px;
+    padding: 0 0.6rem;
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--gray);
+    background: transparent;
+    border: 1.5px solid var(--gray-light);
+    border-radius: 99px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ex-row.show-alt .alt-btn {
+    color: var(--warm);
+    border-color: var(--warm);
+}
 
 .plates {
     font-size: 0.85rem;

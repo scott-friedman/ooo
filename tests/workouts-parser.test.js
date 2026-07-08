@@ -12,7 +12,7 @@ const assert = require('node:assert');
 
 const {
     classifySummary, displayTitle, parseWeightTag, parseTLine,
-    parseBwSegment, parseDescription, tagKind,
+    parseAltSegment, parseBwSegment, parseDescription, tagKind,
 } = require('../js/workouts.js');
 
 test('classifySummary: lift day with duration', () => {
@@ -75,6 +75,18 @@ test('parseTLine: standard and edge-case rows', () => {
     assert.strictEqual(parseTLine('T1  Bench Press — 145 lbs'), null);
 });
 
+test('parseAltSegment: equipment-taken alternate shapes', () => {
+    assert.deepStrictEqual(
+        parseAltSegment('Lat Pulldown → DB Row — 40 lb DBs — 3×12'),
+        { for: 'Lat Pulldown', name: 'DB Row', weight: '40 lb DBs', reps: '3×12' });
+    assert.deepStrictEqual(
+        parseAltSegment('Cable Crunch → Hanging Knee Raise — bodyweight — 3×10–12'),
+        { for: 'Cable Crunch', name: 'Hanging Knee Raise', weight: 'bodyweight', reps: '3×10–12' });
+    // Malformed: no arrow, or too few em-dash fields.
+    assert.strictEqual(parseAltSegment('DB Row — 40 lb DBs — 3×12'), null);
+    assert.strictEqual(parseAltSegment('Lat Pulldown → DB Row — 3×12'), null);
+});
+
 test('parseBwSegment: name/prescription split', () => {
     assert.deepStrictEqual(parseBwSegment('Decline Push Up 5×3–5+AMRAP'),
         { name: 'Decline Push Up', rx: '5×3–5+AMRAP' });
@@ -95,6 +107,8 @@ test('parseDescription: full structured lift day', () => {
         '',
         'Plates · T1 45+5/side · T2 25/side · CGBP 25+5/side',
         '',
+        'Alt (if taken): Lat Pulldown → DB Row — 40 lb DBs — 3×12',
+        '',
         'BW swap (home): Decline Push Up 5×3–5+AMRAP · KB RDL 24kg 3×10 · Table Row 3×10–12',
         '',
         '— Sauna (default-on): 20 min at 160-175°F, post-workout cooldown.',
@@ -109,6 +123,8 @@ test('parseDescription: full structured lift day', () => {
     assert.strictEqual(p.exercises.length, 3);
     assert.strictEqual(p.exercises[1].name, 'Romanian Deadlift');
     assert.deepStrictEqual(p.plates, ['T1 45+5/side', 'T2 25/side', 'CGBP 25+5/side']);
+    assert.deepStrictEqual(p.alts,
+        [{ for: 'Lat Pulldown', name: 'DB Row', weight: '40 lb DBs', reps: '3×12' }]);
     assert.strictEqual(p.bw.length, 3);
     assert.match(p.sauna, /^Sauna \(default-on\)/);
     assert.match(p.sauna, /\nHydration:/);
