@@ -2,6 +2,13 @@
 # Litter Robot HomeAssistant Configuration
 # =============================================================================
 #
+# STATUS 2026-07-08: this pipeline is LIVE on the HA box (restored with
+# database-secret auth after the 6/28 teardown that followed the 4/2 rules
+# lockout). It coexists with the HA-native health monitor in
+# packages/litter_health.yaml — this feeds the public dashboard, that one
+# does phone alerts. This file mirrors the live config with the secret
+# redacted; treat the HA box as canonical.
+#
 # INSTALLATION INSTRUCTIONS:
 #
 # 1. AUTOMATIONS: Copy the automation entries below to your automations.yaml
@@ -98,6 +105,8 @@
 #                 timestamp: '{{ now().timestamp() }}'
 #     - action: rest_command.push_litterrobot_current
 #       data: {}
+#     - action: rest_command.push_litterrobot_history
+#       data: {}
 #   mode: single
 
 
@@ -117,11 +126,6 @@
 #         {{ states('sensor.tot_weight') | float(0) > 0 and
 #            states('sensor.tot_weight') | float(0) < 30 }}
 #   actions:
-#     - action: notify.send_message
-#       target:
-#         entity_id: notify.file
-#       data:
-#         message: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}, {{ states(''sensor.tot_weight'') | float }}'
 #     - action: rest_command.push_litterrobot_weight
 #       data:
 #         weight: '{{ states(''sensor.tot_weight'') | float }}'
@@ -155,7 +159,7 @@
 #         "status": "{{ states('sensor.starshit_status_code') }}",
 #         "wasteLevel": {{ states('sensor.starshit_waste_drawer') | int(0) }},
 #         "litterLevel": {{ states('sensor.starshit_litter_level') | int(0) }},
-#         "lastWeight": {{ states('sensor.starshit_pet_weight') | float(0) }},
+#         "lastWeight": {{ states('sensor.tot_weight') | float(0) }},
 #         "todayVisits": {{ states('counter.litter_robot_counter') | int(0) }},
 #         "todayCycles": {{ states('counter.litter_robot_cycle_count') | int(0) }},
 #         "lastCycle": "{{ states('input_datetime.litter_robot_last_cycle') }}",
@@ -194,7 +198,7 @@
 #         "status": "{{ states('sensor.starshit_status_code') }}",
 #         "wasteLevel": {{ states('sensor.starshit_waste_drawer') | int(0) }},
 #         "litterLevel": {{ states('sensor.starshit_litter_level') | int(0) }},
-#         "lastWeight": {{ states('sensor.starshit_pet_weight') | float(0) }},
+#         "lastWeight": {{ states('sensor.tot_weight') | float(0) }},
 #         "todayVisits": {{ states('counter.litter_robot_counter') | int(0) }},
 #         "todayCycles": {{ states('counter.litter_robot_cycle_count') | int(0) }},
 #         "lastCycle": "{{ states('input_datetime.litter_robot_last_cycle') }}",
@@ -241,9 +245,8 @@
 # - counter.litter_robot_counter            (resets daily)
 # - counter.litter_robot_cycle_count        (resets daily)
 #
-# SENSOR NAME NOTE:
-# Verify these are the same entity or update to be consistent:
-# - sensor.tot_weight (used in weight automation)
-# - sensor.starshit_pet_weight (used in rest_command)
+# SENSOR NAME NOTE (resolved 2026-07-08):
+# sensor.tot_weight is the canonical weight entity — packages/litter_health.yaml
+# builds its statistics on it. Used everywhere here; starshit_pet_weight is stale.
 #
 # =============================================================================
