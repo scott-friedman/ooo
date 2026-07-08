@@ -34,19 +34,9 @@
     }
 
     // ==========================================================================
-    // Firebase Configuration (uses shared config if available)
+    // Firebase Configuration
     // ==========================================================================
-    const FIREBASE_CONFIG = (typeof getFirebaseConfig === 'function')
-        ? getFirebaseConfig('main')
-        : {
-            apiKey: "AIzaSyCFKStIkbW_omKXd7TQb3jUVuBJA4g3zqo",
-            authDomain: "scottfriedman-f400d.firebaseapp.com",
-            databaseURL: "https://scottfriedman-f400d-default-rtdb.firebaseio.com",
-            projectId: "scottfriedman-f400d",
-            storageBucket: "scottfriedman-f400d.firebasestorage.app",
-            messagingSenderId: "1046658110090",
-            appId: "1:1046658110090:web:49a24a0ff13b19cb111373"
-        };
+    const FIREBASE_CONFIG = getFirebaseConfig('main');  // js/firebase-config.js, loaded first on every page
 
     // Get page identifier for page-specific drawings
     function getPageId() {

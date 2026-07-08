@@ -478,19 +478,11 @@ You can use HTML tags like:
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="js/firebase-config.js"></script>
+    <script src="js/sanitize.js"></script>
 
     <script>
-        const FIREBASE_CONFIG = {
-            apiKey: "AIzaSyCFKStIkbW_omKXd7TQb3jUVuBJA4g3zqo",
-            authDomain: "scottfriedman-f400d.firebaseapp.com",
-            databaseURL: "https://scottfriedman-f400d-default-rtdb.firebaseio.com",
-            projectId: "scottfriedman-f400d",
-            storageBucket: "scottfriedman-f400d.firebasestorage.app",
-            messagingSenderId: "1046658110090",
-            appId: "1:1046658110090:web:49a24a0ff13b19cb111373"
-        };
-
-        firebase.initializeApp(FIREBASE_CONFIG);
+        firebase.initializeApp(getFirebaseConfig('main'));
         const db = firebase.database();
         const auth = firebase.auth();
 
@@ -1096,13 +1088,9 @@ You can use HTML tags like:
                 });
         }
 
+        // Single site-wide implementation lives in js/sanitize.js. (ARCH-3)
         function esc(str) {
-            return String(str ?? '')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
+            return Sanitize.escapeHtml(str);
         }
 
         // ==================== Command Center ====================

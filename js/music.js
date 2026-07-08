@@ -10,15 +10,7 @@
     // Configuration
     // ==========================================================================
 
-    const FIREBASE_CONFIG = {
-        apiKey: "AIzaSyCFKStIkbW_omKXd7TQb3jUVuBJA4g3zqo",
-        authDomain: "scottfriedman-f400d.firebaseapp.com",
-        databaseURL: "https://scottfriedman-f400d-default-rtdb.firebaseio.com",
-        projectId: "scottfriedman-f400d",
-        storageBucket: "scottfriedman-f400d.firebasestorage.app",
-        messagingSenderId: "1046658110090",
-        appId: "1:1046658110090:web:49a24a0ff13b19cb111373"
-    };
+    const FIREBASE_CONFIG = getFirebaseConfig('main');  // js/firebase-config.js, loaded first on every page
 
     const STEPS = 16;
 
@@ -763,12 +755,10 @@
     // Utility
     // ==========================================================================
 
+    // Single site-wide implementation lives in js/sanitize.js — the old
+    // local copy missed single quotes. (ARCH-3)
     function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/&/g, '&amp;')
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;')
-                  .replace(/"/g, '&quot;');
+        return Sanitize.escapeHtml(str);
     }
 
     // ==========================================================================

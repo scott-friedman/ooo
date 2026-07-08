@@ -16,16 +16,10 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // ==========================================================================
-// Firebase Configuration
+// Firebase Configuration — shared js/firebase-config.js (classic script,
+// runs before this module) exposes window.FIREBASE_CONFIGS
 // ==========================================================================
-const FIREBASE_CONFIG = {
-    apiKey: "AIzaSyBxxG0U3hg9Pv13fCY_e9lMaCseozloOcQ",
-    authDomain: "inky-179bb.firebaseapp.com",
-    projectId: "inky-179bb",
-    storageBucket: "inky-179bb.firebasestorage.app",
-    messagingSenderId: "817484798144",
-    appId: "1:817484798144:web:8e42f66edae0976d573525"
-};
+const FIREBASE_CONFIG = window.FIREBASE_CONFIGS.eink;
 
 const app = initializeApp(FIREBASE_CONFIG);
 const db = getFirestore(app);

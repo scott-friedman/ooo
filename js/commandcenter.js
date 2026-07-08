@@ -9,21 +9,10 @@
     // Configuration
     const WORKER_URL = 'https://ha-command-center.s-friedman.workers.dev';
 
-    // Firebase Configuration (uses shared config if available)
-    const FIREBASE_CONFIG = (typeof getFirebaseConfig === 'function')
-        ? getFirebaseConfig('main')
-        : {
-            apiKey: "AIzaSyCFKStIkbW_omKXd7TQb3jUVuBJA4g3zqo",
-            authDomain: "scottfriedman-f400d.firebaseapp.com",
-            databaseURL: "https://scottfriedman-f400d-default-rtdb.firebaseio.com",
-            projectId: "scottfriedman-f400d",
-            storageBucket: "scottfriedman-f400d.firebasestorage.app",
-            messagingSenderId: "1046658110090",
-            appId: "1:1046658110090:web:49a24a0ff13b19cb111373"
-        };
+    const FIREBASE_CONFIG = getFirebaseConfig('main');  // js/firebase-config.js, loaded first on every page
 
-    // State
-    let isEnabled = true;
+    // State — enabled starts false (fail closed) until Firebase confirms (UX-2)
+    let isEnabled = false;
     let devices = {};
     let db = null;
     let lastLogTimestamp = 0;
@@ -38,8 +27,10 @@
     const disabledBanner = document.getElementById('disabled-banner');
 
     // Escape everything interpolated into innerHTML — device names, media
-    // titles, and log entries all originate outside this page.
-    const esc = window.Sanitize ? window.Sanitize.escapeHtml : (s) => String(s ?? '');
+    // titles, and log entries all originate outside this page. sanitize.js
+    // loads before this script; the old non-escaping fallback defeated the
+    // point. (ARCH-3)
+    const esc = Sanitize.escapeHtml;
 
     /**
      * Initialize Firebase

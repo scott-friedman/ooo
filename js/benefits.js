@@ -10,18 +10,7 @@
     const WORKER_URL = 'https://benefits-api.s-friedman.workers.dev';
     const HISTORY_LIMIT = 20;
 
-    // Firebase Configuration (uses shared config if available)
-    const FIREBASE_CONFIG = (typeof getFirebaseConfig === 'function')
-        ? getFirebaseConfig('main')
-        : {
-            apiKey: "AIzaSyCFKStIkbW_omKXd7TQb3jUVuBJA4g3zqo",
-            authDomain: "scottfriedman-f400d.firebaseapp.com",
-            databaseURL: "https://scottfriedman-f400d-default-rtdb.firebaseio.com",
-            projectId: "scottfriedman-f400d",
-            storageBucket: "scottfriedman-f400d.firebasestorage.app",
-            messagingSenderId: "1046658110090",
-            appId: "1:1046658110090:web:49a24a0ff13b19cb111373"
-        };
+    const FIREBASE_CONFIG = getFirebaseConfig('main');  // js/firebase-config.js, loaded first on every page
 
     // DOM elements
     const queryInput = document.getElementById('query-input');
@@ -610,12 +599,11 @@
     }
 
     /**
-     * Escape HTML to prevent XSS
+     * Escape HTML to prevent XSS — single site-wide implementation
+     * lives in js/sanitize.js. (ARCH-3)
      */
     function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return Sanitize.escapeHtml(text);
     }
 
     /**
