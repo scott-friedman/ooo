@@ -5,6 +5,9 @@
 node_modules/
 promo-video/out/
 
+# Firebase emulator debug logs
+*-debug.log
+
 # Tot cat-sitting guide — contains street address & key location; kept local
 # on purpose, never publish (decision 2026-07-08)
 tot.html
