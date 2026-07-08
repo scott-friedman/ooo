@@ -1,0 +1,477 @@
+/* ==========================================================================
+   Workouts — unlisted, phone-first day cards with a Gym/Home toggle.
+   Builds on css/style.css variables; dark mode remaps them locally.
+   ========================================================================== */
+
+body.workouts-page {
+    font-size: 17px;
+    line-height: 1.45;
+}
+
+/* style.css disables pointer events on main for the drawing canvas */
+main.workouts {
+    pointer-events: auto;
+    padding: 1rem 1rem 3rem;
+    max-width: 640px;
+}
+
+main.workouts a,
+main.workouts button,
+main.workouts input,
+main.workouts details,
+main.workouts summary {
+    pointer-events: auto;
+}
+
+/* ─── Header ─────────────────────────────────────────────────────── */
+
+.workouts .back-link {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.workouts h1 {
+    font-size: 1.6rem;
+    margin-top: 0.5rem;
+}
+
+.workouts .plan-meta {
+    color: var(--gray);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+/* ─── Gym/Home toggle ────────────────────────────────────────────── */
+
+.mode-toggle {
+    position: sticky;
+    top: 0.5rem;
+    z-index: 10;
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 1.25rem;
+    border: 1.5px solid var(--black);
+    border-radius: 14px;
+    background: var(--white);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.mode-toggle button {
+    flex: 1;
+    min-height: 44px;
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--gray);
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.mode-toggle button[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--white);
+}
+
+/* ─── Banner + token form + footer ───────────────────────────────── */
+
+.banner {
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 1rem;
+    border: 1.5px dashed var(--warm);
+    border-radius: 10px;
+    color: var(--warm);
+    font-size: 0.9rem;
+}
+
+.banner .retry-btn {
+    margin-left: 0.5rem;
+    min-height: 32px;
+    padding: 0 0.8rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: var(--warm);
+    background: transparent;
+    border: 1.5px solid var(--warm);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.token-section p {
+    color: var(--gray);
+    font-size: 0.95rem;
+}
+
+.token-section .token-error {
+    color: var(--warm);
+}
+
+.token-section form {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.token-section input {
+    flex: 1;
+    min-height: 44px;
+    padding: 0 0.75rem;
+    font-family: inherit;
+    font-size: 1rem;
+    color: var(--black);
+    background: var(--white);
+    border: 1.5px solid var(--gray-light);
+    border-radius: 10px;
+}
+
+.token-section button {
+    min-height: 44px;
+    padding: 0 1.2rem;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--white);
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.page-footer {
+    margin-top: 2rem;
+    display: flex;
+    justify-content: space-between;
+    color: var(--gray-light);
+    font-size: 0.8rem;
+}
+
+.page-footer a {
+    color: var(--gray-light);
+}
+
+/* ─── Day cards ──────────────────────────────────────────────────── */
+
+.day-card {
+    margin-bottom: 1rem;
+    padding: 0.9rem 1rem;
+    border: 1.5px solid var(--light);
+    border-radius: 14px;
+    background: var(--white);
+    scroll-margin-top: 4.5rem; /* clear the sticky toggle on auto-scroll */
+}
+
+.day-card.is-today {
+    border: 2px solid var(--accent);
+    box-shadow: 0 2px 14px rgba(45, 90, 61, 0.18);
+}
+
+.day-card.past {
+    opacity: 0.6;
+}
+
+details.day-card > summary {
+    cursor: pointer;
+    list-style: none;
+}
+
+details.day-card > summary::-webkit-details-marker {
+    display: none;
+}
+
+details.day-card[open] {
+    opacity: 0.85;
+}
+
+.day-date {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gray-light);
+}
+
+.pill-today {
+    padding: 0.1rem 0.5rem;
+    font-size: 0.7rem;
+    color: var(--white);
+    background: var(--accent);
+    border-radius: 99px;
+}
+
+.day-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.25rem 0 0;
+    font-size: 1.3rem;
+}
+
+.day-code {
+    padding: 0.05rem 0.45rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--white);
+    background: var(--black);
+    border-radius: 8px;
+}
+
+.day-name {
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.03em;
+    font-weight: 700;
+}
+
+.day-name.type-rest,
+.day-name.type-run {
+    color: var(--gray);
+}
+
+.done-check {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.duration {
+    margin-left: auto;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--gray-light);
+    white-space: nowrap;
+}
+
+.day-body {
+    margin-top: 0.6rem;
+}
+
+.day-body p {
+    margin-bottom: 0.6rem;
+    color: var(--black);
+}
+
+.day-body .prose {
+    font-size: 0.95rem;
+    color: var(--gray);
+}
+
+/* ─── Lift content ───────────────────────────────────────────────── */
+
+.warmup {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.warmup-label {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    color: var(--gray-light);
+    margin-right: 0.25rem;
+}
+
+.exercise-list {
+    margin: 0.75rem 0;
+}
+
+.ex-row {
+    display: flex;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--light);
+}
+
+.ex-row:last-child {
+    border-bottom: none;
+}
+
+.tier {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    margin-top: 0.15rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border-radius: 7px;
+    color: var(--white);
+    background: var(--gray-light);
+}
+
+.tier-t1 { background: var(--accent); }
+.tier-t2 { background: var(--warm); }
+
+.ex {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.ex-name {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.ex-line2 {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.7rem;
+}
+
+.ex-weight {
+    font-size: 1.2rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+.ex-reps {
+    font-size: 0.95rem;
+    color: var(--gray);
+    white-space: nowrap;
+}
+
+.tag {
+    padding: 0.05rem 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1.5px solid currentColor;
+    border-radius: 99px;
+    color: var(--gray);
+    white-space: nowrap;
+}
+
+.tag-up { color: var(--accent); }
+.tag-retry { color: var(--warm); }
+.tag-tbd { border-style: dashed; color: var(--gray-light); }
+
+.plates {
+    font-size: 0.85rem;
+    color: var(--gray);
+    font-variant-numeric: tabular-nums;
+}
+
+.sauna {
+    padding: 0.5rem 0.7rem;
+    font-size: 0.85rem;
+    color: var(--gray);
+    background: var(--light);
+    border-radius: 10px;
+    white-space: pre-line;
+}
+
+.no-bw-note {
+    display: none;
+    font-size: 0.9rem;
+    color: var(--gray-light);
+    font-style: italic;
+}
+
+/* ─── Bodyweight (home) content ──────────────────────────────────── */
+
+.bw-only { display: none; }
+
+.bw-caption {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--gray-light);
+    margin-bottom: 0.25rem;
+}
+
+.bw-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--light);
+}
+
+.bw-row:last-child { border-bottom: none; }
+
+.bw-name {
+    font-weight: 600;
+}
+
+.bw-rx {
+    color: var(--gray);
+    font-size: 0.95rem;
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* Home mode: swap lift content for the bodyweight prescription */
+body.mode-home .day-card.has-bw .gym-only { display: none; }
+body.mode-home .day-card.has-bw .bw-only { display: block; }
+body.mode-home .day-card.type-lift:not(.has-bw) .no-bw-note { display: block; }
+
+/* ─── Notes ──────────────────────────────────────────────────────── */
+
+.notes {
+    margin-top: 0.5rem;
+}
+
+.notes summary {
+    cursor: pointer;
+    min-height: 32px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--gray);
+}
+
+.notes-list {
+    margin-top: 0.4rem;
+}
+
+.notes-list li {
+    position: relative;
+    padding-left: 0.9rem;
+    margin-bottom: 0.45rem;
+    font-size: 0.88rem;
+    color: var(--gray);
+}
+
+.notes-list li::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--gray-light);
+}
+
+.raw-fallback {
+    margin-top: 0.6rem;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--gray);
+}
+
+/* ─── Dark mode (this page only) ─────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+    body.workouts-page {
+        --black: #ececec;
+        --gray: #a8a8a8;
+        --gray-light: #7d7d7d;
+        --light: #2b2b2b;
+        --white: #161616;
+        --accent: #6fbf87;
+        --accent-light: #4a8c5f;
+        --warm: #e08560;
+        --warm-light: #5a3527;
+    }
+
+    .day-card.is-today {
+        box-shadow: 0 2px 14px rgba(111, 191, 135, 0.15);
+    }
+
+    .mode-toggle {
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+}

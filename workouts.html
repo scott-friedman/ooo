@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- Unlisted personal page: no analytics, no indexing, not in sitemap. -->
+    <meta name="robots" content="noindex,nofollow">
+    <meta name="color-scheme" content="light dark">
+    <title>workouts</title>
+
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workouts.css">
+</head>
+<body class="workouts-page">
+    <main class="workouts">
+        <header class="page-header">
+            <a class="back-link" href="index.html">← scottfriedman.ooo</a>
+            <h1>workouts</h1>
+            <p class="plan-meta" id="plan-meta"></p>
+        </header>
+
+        <div class="mode-toggle" role="group" aria-label="Workout location">
+            <button type="button" data-mode="gym" aria-pressed="true">Gym</button>
+            <button type="button" data-mode="home" aria-pressed="false">Home</button>
+        </div>
+
+        <div class="banner" id="banner" hidden></div>
+
+        <section class="token-section" id="token-section" hidden>
+            <p>This page needs the access code from your workouts link
+               (the part after <code>#</code>).</p>
+            <p class="token-error" id="token-message" hidden></p>
+            <form id="token-form">
+                <input type="text" id="token-input" inputmode="text" autocomplete="off"
+                       autocapitalize="off" spellcheck="false" placeholder="access code">
+                <button type="submit">open</button>
+            </form>
+        </section>
+
+        <div id="days"></div>
+
+        <footer class="page-footer">
+            <span id="fetched-at"></span>
+            <a href="#" id="reset-token">reset access code</a>
+        </footer>
+    </main>
+
+    <script src="js/workouts.js"></script>
+</body>
+</html>
