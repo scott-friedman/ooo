@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Dependencies / build output
+node_modules/
+promo-video/out/
+
+# Tot cat-sitting guide — contains street address & key location; kept local
+# on purpose, never publish (decision 2026-07-08)
+tot.html
+tot-guide.html
+tot.pdf
+css/tot.css
+assets/tot/
+
+# Executed plan handoffs
+tot-plan.md
+stickynotes-plan.md
+
+# Repo audit — documents not-yet-fixed attack vectors; the repo is public
+# and served at scottfriedman.ooo, so keep this local
+IMPROVEMENTS.md
