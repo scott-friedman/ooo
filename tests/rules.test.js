@@ -186,6 +186,74 @@ test('anon can draw a valid stroke but not clear the canvas', async () => {
     await assertSucceeds(remove(ref(adminDb(), 'strokes/index')));
 });
 
+test('strokes over the 2000-point cap are rejected', async () => {
+    const points = Array.from({ length: 2001 }, (_, i) => ({ x: i, y: i }));
+    await assertFails(set(ref(anonDb(), 'strokes/index/s2'), {
+        points,
+        width: 5,
+        timestamp: Date.now(),
+    }));
+});
+
+// ---------- music ----------
+
+const validBar = () => ({
+    name: 'test bar',
+    creator: 'tester',
+    bpm: 120,
+    drums: [[true, false]],
+    melody: [[false, true]],
+    createdAt: Date.now(),
+});
+
+test('anon can create a valid bar but not arbitrary JSON or huge names', async () => {
+    await assertSucceeds(set(ref(anonDb(), 'music/bars/bar1'), validBar()));
+    await assertFails(set(ref(anonDb(), 'music/bars/bar2'), { junk: 'x'.repeat(100000) }));
+    await assertFails(set(ref(anonDb(), 'music/bars/bar3'),
+        { ...validBar(), name: 'x'.repeat(61) }));
+});
+
+test('bars are create-only for anon; admin can delete', async () => {
+    await set(ref(anonDb(), 'music/bars/bar4'), validBar());
+    await assertFails(set(ref(anonDb(), 'music/bars/bar4'),
+        { ...validBar(), name: 'defaced' }));
+    await assertFails(remove(ref(anonDb(), 'music/bars/bar4')));
+    await assertSucceeds(remove(ref(adminDb(), 'music/bars/bar4')));
+});
+
+const validSong = () => ({
+    name: 'test song',
+    creator: 'tester',
+    barIds: ['bar1', 'bar2'],
+    createdAt: Date.now(),
+});
+
+test('anon can create a valid song; junk fields and missing fields rejected', async () => {
+    await assertSucceeds(set(ref(anonDb(), 'music/songs/song1'), validSong()));
+    await assertFails(set(ref(anonDb(), 'music/songs/song2'),
+        { ...validSong(), payload: 'arbitrary' }));
+    await assertFails(set(ref(anonDb(), 'music/songs/song3'), { name: 'no barIds' }));
+});
+
+test('songs are create-only for anon; barIds capped at 100', async () => {
+    await set(ref(anonDb(), 'music/songs/song4'), validSong());
+    await assertFails(set(ref(anonDb(), 'music/songs/song4'),
+        { ...validSong(), name: 'defaced' }));
+    await assertFails(set(ref(anonDb(), 'music/songs/song5'),
+        { ...validSong(), barIds: Array.from({ length: 101 }, (_, i) => `bar${i}`) }));
+});
+
+// ---------- benefits history ----------
+
+test('history entries take only query + timestamp, bounded', async () => {
+    await assertSucceeds(set(ref(anonDb(), 'benefits/history/h1'),
+        { query: 'kiwi', timestamp: Date.now() }));
+    await assertFails(set(ref(anonDb(), 'benefits/history/h2'),
+        { query: 'kiwi', timestamp: Date.now(), extra: 'payload' }));
+    await assertFails(set(ref(anonDb(), 'benefits/history/h3'),
+        { query: 'x'.repeat(201), timestamp: Date.now() }));
+});
+
 // ---------- admin config ----------
 
 test('anon cannot read admins or admin_config', async () => {

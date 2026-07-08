@@ -265,10 +265,13 @@
                     drawStroke(stroke.points, stroke.color, stroke.width);
                 }
             };
-            strokesRef.on('child_added', strokesCallback, (error) => {
+            // Cap the initial download — the node grows forever and old
+            // strokes are mostly painted over anyway. (PERF-2)
+            const strokesQuery = strokesRef.orderByKey().limitToLast(500);
+            strokesQuery.on('child_added', strokesCallback, (error) => {
                 console.error('Failed to load strokes:', error);
             });
-            firebaseListeners.push({ ref: strokesRef, event: 'child_added', callback: strokesCallback });
+            firebaseListeners.push({ ref: strokesQuery, event: 'child_added', callback: strokesCallback });
 
             // Listen for canvas clear events (only respond to NEW clears after page load)
             const clearRef = db.ref('canvas_cleared/' + pageId);
@@ -423,7 +426,11 @@
         ctx.lineTo(pixels.x, pixels.y);
         ctx.stroke();
 
-        currentStroke.push({ x: pos.x, y: pos.y, color, width });  // store in reference space
+        // Cap matches the 2000-point bound in firebase.rules.json — past it
+        // the stroke keeps rendering locally but stops recording.
+        if (currentStroke.length < 2000) {
+            currentStroke.push({ x: pos.x, y: pos.y, color, width });  // store in reference space
+        }
         lastX = pixels.x;
         lastY = pixels.y;
 

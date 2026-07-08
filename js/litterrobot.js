@@ -899,9 +899,14 @@
     }
 
     // Refresh data from Firebase
+    // History has one entry per day forever; 400 covers the 1y chart with
+    // headroom. Once the dataset outgrows it, "All" means "last 400 days".
+    // Keys are YYYY-MM-DD, so orderByKey is chronological. (PERF-2)
+    const HISTORY_LIMIT = 400;
+
     function refreshData() {
         const db = initFirebase();
-        db.ref('litterrobot/history').once('value').then((snapshot) => {
+        db.ref('litterrobot/history').orderByKey().limitToLast(HISTORY_LIMIT).once('value').then((snapshot) => {
             historyData = snapshot.val() || {};
             updateActivityChart(chartPeriods.activity);
             updateWeightChart(chartPeriods.weight);
@@ -925,7 +930,7 @@
             showError('Unable to connect to database');
         });
 
-        db.ref('litterrobot/history').once('value').then((snapshot) => {
+        db.ref('litterrobot/history').orderByKey().limitToLast(HISTORY_LIMIT).once('value').then((snapshot) => {
             historyData = snapshot.val() || {};
             updateActivityChart(chartPeriods.activity);
             updateWeightChart(chartPeriods.weight);

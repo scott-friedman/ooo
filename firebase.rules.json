@@ -35,10 +35,10 @@
         ".read": true,
         ".write": true,
         "$historyId": {
-          ".validate": "newData.hasChildren(['query', 'timestamp']) &&
-                        newData.child('query').isString() &&
-                        newData.child('query').val().length <= 200 &&
-                        newData.child('timestamp').isNumber()"
+          ".validate": "newData.hasChildren(['query', 'timestamp'])",
+          "query": { ".validate": "newData.isString() && newData.val().length <= 200" },
+          "timestamp": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" },
+          "$other": { ".validate": false }
         }
       },
       // Expansions: Public read, only authenticated can write
@@ -96,12 +96,17 @@
         ".write": "auth != null && root.child('admins').child(auth.uid).exists() && !newData.exists()",
         "$strokeId": {
           ".write": true,
+          // Point cap: a real stroke is a few hundred points; index 2000
+          // absent bounds the payload without counting children (which
+          // rules can't do). (SEC-3)
           ".validate": "newData.hasChildren(['points', 'width', 'timestamp']) &&
                         newData.child('width').isNumber() &&
                         newData.child('width').val() >= 1 &&
                         newData.child('width').val() <= 50 &&
                         newData.child('timestamp').isNumber() &&
-                        newData.child('points').hasChildren()"
+                        newData.child('timestamp').val() <= now + 300000 &&
+                        newData.child('points').hasChildren() &&
+                        !newData.child('points').child('2000').exists()"
         }
       }
     },
@@ -154,15 +159,34 @@
     // ========================================
     "music": {
       ".read": true,
+      // Bars/songs are create-only for the public (the page never edits
+      // them after save); admin can delete spam. String/number bounds keep
+      // this from being a free arbitrary-JSON store. (SEC-3)
       "bars": {
         "$barId": {
-          ".write": true,
-          ".validate": "newData.hasChildren(['drums', 'melody'])"
+          ".write": "!data.exists() || (auth != null && root.child('admins').child(auth.uid).exists() && !newData.exists())",
+          ".validate": "newData.hasChildren(['drums', 'melody', 'name', 'creator', 'createdAt']) &&
+                        newData.child('name').isString() &&
+                        newData.child('name').val().length <= 60 &&
+                        newData.child('creator').isString() &&
+                        newData.child('creator').val().length <= 60 &&
+                        (!newData.hasChild('bpm') || (newData.child('bpm').isNumber() && newData.child('bpm').val() >= 20 && newData.child('bpm').val() <= 400)) &&
+                        newData.child('createdAt').isNumber() &&
+                        newData.child('createdAt').val() <= now + 300000"
         }
       },
       "songs": {
         "$songId": {
-          ".write": true
+          ".write": "!data.exists() || (auth != null && root.child('admins').child(auth.uid).exists() && !newData.exists())",
+          ".validate": "newData.hasChildren(['name', 'creator', 'barIds', 'createdAt'])",
+          "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "creator": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "barIds": {
+            ".validate": "newData.hasChildren() && !newData.child('100').exists()",
+            "$idx": { ".validate": "newData.isString() && newData.val().length <= 64" }
+          },
+          "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" },
+          "$other": { ".validate": false }
         }
       }
     },
