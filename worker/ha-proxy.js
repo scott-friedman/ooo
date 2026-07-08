@@ -123,7 +123,7 @@ export default {
             }
 
             if (path === '/api/control' && request.method === 'POST') {
-                return await handleControl(request, env, corsHeaders);
+                return await handleControl(request, env, corsHeaders, ctx);
             }
 
             if (path === '/api/devices') {
@@ -187,7 +187,9 @@ async function getAllowedDevices(env) {
         return devices;
     } catch (error) {
         console.error('Failed to get devices:', error);
-        return {};
+        // null = "couldn't fetch the list" — callers must not confuse this
+        // with "no devices allowed" (it used to surface as a 403). (ERR-4)
+        return null;
     }
 }
 
@@ -218,6 +220,35 @@ async function logAction(env, entityId, action, deviceName) {
     }
 }
 
+// Keep only the most recent log entries — the log previously grew forever
+// and the page downloads it. Push keys sort chronologically. (PERF-3)
+const MAX_LOG_ENTRIES = 200;
+
+async function pruneLog(env) {
+    try {
+        const res = await fetch(
+            `${env.FIREBASE_URL}/commandcenter/log.json?shallow=true&auth=${env.FIREBASE_SECRET}`,
+            { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
+        );
+        const keys = Object.keys((await res.json()) || {});
+        if (keys.length <= MAX_LOG_ENTRIES) return;
+        keys.sort();
+        const excess = keys.slice(0, keys.length - MAX_LOG_ENTRIES);
+        const deletions = Object.fromEntries(excess.map(k => [k, null]));
+        await fetch(
+            `${env.FIREBASE_URL}/commandcenter/log.json?auth=${env.FIREBASE_SECRET}`,
+            {
+                method: 'PATCH',
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(deletions)
+            }
+        );
+    } catch (error) {
+        console.error('Log prune failed:', error);
+    }
+}
+
 /**
  * GET /api/status - Check if command center is enabled
  */
@@ -231,6 +262,9 @@ async function handleStatus(env, corsHeaders) {
  */
 async function handleGetDevices(env, corsHeaders) {
     const devices = await getAllowedDevices(env);
+    if (devices === null) {
+        return jsonResponse({ error: 'Device list unavailable' }, 503, corsHeaders);
+    }
     return jsonResponse({ devices }, 200, corsHeaders);
 }
 
@@ -245,6 +279,9 @@ async function handleGetState(env, corsHeaders) {
     }
 
     const devices = await getAllowedDevices(env);
+    if (devices === null) {
+        return jsonResponse({ error: 'Device list unavailable' }, 503, corsHeaders);
+    }
     const entityIds = Object.keys(devices);
 
     if (entityIds.length === 0) {
@@ -345,7 +382,7 @@ async function handleGetState(env, corsHeaders) {
  * Optional params for turn_on: rgb_color ([r,g,b]), brightness (0-100)
  * Optional params for set_percentage: percentage (0-100)
  */
-async function handleControl(request, env, corsHeaders) {
+async function handleControl(request, env, corsHeaders, ctx) {
     // Rate limiting
     const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
     if (!checkRateLimit(clientIP)) {
@@ -377,6 +414,9 @@ async function handleControl(request, env, corsHeaders) {
 
     // Validate entity is allowed
     const devices = await getAllowedDevices(env);
+    if (devices === null) {
+        return jsonResponse({ error: 'Device list unavailable, try again' }, 503, corsHeaders);
+    }
     if (!devices[entity_id]) {
         return jsonResponse({ error: 'Device not allowed' }, 403, corsHeaders);
     }
@@ -434,8 +474,9 @@ async function handleControl(request, env, corsHeaders) {
         if (action === 'media_play') logMessage = 'played';
         if (action === 'media_pause') logMessage = 'paused';
 
-        // Log the action
+        // Log the action; prune old entries after the response goes out
         await logAction(env, entity_id, logMessage, devices[entity_id]?.name);
+        if (ctx) ctx.waitUntil(pruneLog(env));
 
         return jsonResponse({
             success: true,

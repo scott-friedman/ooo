@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-097VQD41F8"></script>
     <script>
@@ -647,8 +648,12 @@ You can use HTML tags like:
         let projects = [], writing = [], sounds = [], contact = [], pages = [];
         let editingPageSlug = null;
         let sectionOrder = ['about', 'projects', 'writing', 'sounds', 'contact'];
+        // Set when the content read fails: the editor is showing placeholder
+        // DEFAULTS, and saving would overwrite the live homepage with them. (ERR-2)
+        let contentLoadFailed = false;
 
         function loadCurrentContent() {
+            contentLoadFailed = false;
             db.ref('content').once('value').then((snapshot) => {
                 const data = snapshot.val() || DEFAULTS;
 
@@ -671,13 +676,13 @@ You can use HTML tags like:
                 contact = data.contact?.length ? data.contact : DEFAULTS.contact;
 
                 renderSections();
-            }).catch(() => {
-                window.aboutParas = DEFAULTS.about.paragraphs;
-                projects = DEFAULTS.projects;
-                writing = DEFAULTS.writing;
-                sounds = DEFAULTS.sounds;
-                contact = DEFAULTS.contact;
-                renderSections();
+            }).catch((err) => {
+                contentLoadFailed = true;
+                const container = document.getElementById('sections-container');
+                container.innerHTML = '<div class="status error" style="display:block; padding: 16px;">' +
+                    'Failed to load the current homepage content (' + esc(err.message) + '). ' +
+                    'Saving is disabled so placeholder defaults don\'t overwrite the live page. ' +
+                    '<button onclick="loadCurrentContent()">Retry</button></div>';
             });
         }
 
@@ -1059,6 +1064,11 @@ You can use HTML tags like:
         // Save home content
         function saveContent() {
             const status = document.getElementById('save-status');
+            if (contentLoadFailed) {
+                status.textContent = 'Not saved: current content never loaded. Retry the load first.';
+                status.className = 'status error';
+                return;
+            }
             status.textContent = 'Saving...';
             status.className = 'status';
 

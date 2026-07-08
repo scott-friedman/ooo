@@ -890,9 +890,27 @@
         });
     }
 
-    // Load content after Firebase is ready
+    function revealContent() {
+        document.body.classList.remove('content-loading');
+        document.body.classList.add('content-loaded');
+    }
+
+    // Load content after Firebase is ready. The try/catch matters when the
+    // Firebase SDK itself failed to load (ad-blocker/offline): `firebase` is
+    // then undefined and loadContent throws synchronously, which used to
+    // leave the homepage permanently blank behind content-loading. (ERR-5)
     if (FIREBASE_CONFIG.apiKey) {
-        loadContent();
+        try {
+            loadContent();
+        } catch (err) {
+            console.log('Content load failed, using defaults:', err);
+            revealContent();
+        }
+    }
+
+    // Failsafe: whatever else happens, never leave the page hidden.
+    if (document.body.classList.contains('content-loading')) {
+        setTimeout(revealContent, 3000);
     }
 
 })();

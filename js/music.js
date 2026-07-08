@@ -415,6 +415,11 @@
                         loadBarToEditor(card.dataset.id);
                     });
                 });
+            })
+            .catch(err => {
+                console.error('Failed to load bars:', err);
+                const library = document.getElementById('bar-library');
+                if (library) library.innerHTML = '<p class="loading">Couldn’t load bars — check your connection and refresh.</p>';
             });
     }
 
@@ -643,6 +648,11 @@
                 document.querySelectorAll('.song-item .song-btn').forEach(btn => {
                     btn.addEventListener('click', () => loadAndPlaySong(btn.dataset.id));
                 });
+            })
+            .catch(err => {
+                console.error('Failed to load songs:', err);
+                const songList = document.getElementById('song-list');
+                if (songList) songList.innerHTML = '<p class="loading">Couldn’t load songs — check your connection and refresh.</p>';
             });
     }
 
@@ -655,6 +665,9 @@
             songBars = song.barIds || [];
             renderSongTimeline();
             playSong();
+        }).catch(err => {
+            console.error('Failed to load song:', err);
+            alert('Couldn’t load that song. Please try again.');
         });
     }
 
@@ -699,12 +712,20 @@
             saveBar(name, creator).then(() => {
                 hideSaveModal();
                 clearGrid();
+            }).catch(err => {
+                console.error('Failed to save bar:', err);
+                alert('Couldn’t save your bar — please try again.');
             });
         } else {
             saveSong(name, creator).then(() => {
                 hideSaveModal();
             }).catch(err => {
-                alert('Add some bars to your song first!');
+                if (err === 'No bars in song') {
+                    alert('Add some bars to your song first!');
+                } else {
+                    console.error('Failed to save song:', err);
+                    alert('Couldn’t save your song — please try again.');
+                }
             });
         }
     }

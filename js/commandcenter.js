@@ -78,7 +78,9 @@
      */
     function listenForEnabledState() {
         db.ref('commandcenter/enabled').on('value', (snapshot) => {
-            isEnabled = snapshot.val() !== false; // Default to true if not set
+            // Default OFF when unset — matches the worker's fail-closed
+            // checkEnabled and the admin panel's toggle. (UX-2)
+            isEnabled = snapshot.val() === true;
             updateEnabledUI();
         }, (error) => {
             console.error('Failed to load enabled state:', error);
@@ -849,8 +851,15 @@
      * Periodically refresh device states
      */
     function startStateRefresh() {
-        // Refresh every 30 seconds
-        setInterval(fetchDevices, 30000);
+        // Refresh every 30 seconds — but not for hidden tabs, which used to
+        // poll the worker (and HA behind it) indefinitely. Refresh
+        // immediately on return so the state isn't stale. (PERF-3)
+        setInterval(() => {
+            if (!document.hidden) fetchDevices();
+        }, 30000);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) fetchDevices();
+        });
     }
 
     /**
