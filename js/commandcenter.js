@@ -37,6 +37,10 @@
     const activityLog = document.getElementById('activity-log');
     const disabledBanner = document.getElementById('disabled-banner');
 
+    // Escape everything interpolated into innerHTML — device names, media
+    // titles, and log entries all originate outside this page.
+    const esc = window.Sanitize ? window.Sanitize.escapeHtml : (s) => String(s ?? '');
+
     /**
      * Initialize Firebase
      */
@@ -76,6 +80,8 @@
         db.ref('commandcenter/enabled').on('value', (snapshot) => {
             isEnabled = snapshot.val() !== false; // Default to true if not set
             updateEnabledUI();
+        }, (error) => {
+            console.error('Failed to load enabled state:', error);
         });
     }
 
@@ -146,7 +152,7 @@
                 const presetSwatches = presetColors.map(c => `
                     <button
                         class="color-preset"
-                        data-entity-id="${entityId}"
+                        data-entity-id="${esc(entityId)}"
                         data-rgb="${c.rgb.join(',')}"
                         style="background: rgb(${c.rgb.join(',')})"
                         title="${c.name}"
@@ -163,7 +169,7 @@
                                 <input
                                     type="color"
                                     class="color-picker"
-                                    data-entity-id="${entityId}"
+                                    data-entity-id="${esc(entityId)}"
                                     value="${rgbToHex(device.rgb_color || [255, 255, 255])}"
                                     ${!isEnabled || !isOn ? 'disabled' : ''}
                                 >
@@ -187,19 +193,19 @@
                         <div class="fan-buttons">
                             <button
                                 class="fan-btn ${currentSpeed === 33 ? 'active' : ''}"
-                                data-entity-id="${entityId}"
+                                data-entity-id="${esc(entityId)}"
                                 data-speed="33"
                                 ${!isEnabled || !isOn ? 'disabled' : ''}
                             >Low</button>
                             <button
                                 class="fan-btn ${currentSpeed === 66 ? 'active' : ''}"
-                                data-entity-id="${entityId}"
+                                data-entity-id="${esc(entityId)}"
                                 data-speed="66"
                                 ${!isEnabled || !isOn ? 'disabled' : ''}
                             >Med</button>
                             <button
                                 class="fan-btn ${currentSpeed === 100 ? 'active' : ''}"
-                                data-entity-id="${entityId}"
+                                data-entity-id="${esc(entityId)}"
                                 data-speed="100"
                                 ${!isEnabled || !isOn ? 'disabled' : ''}
                             >High</button>
@@ -209,10 +215,10 @@
             }
 
             return `
-                <div class="device-card ${disabledClass}" data-entity-id="${entityId}">
+                <div class="device-card ${disabledClass}" data-entity-id="${esc(entityId)}">
                     <div class="device-header">
-                        <span class="device-emoji">${device.emoji || '🔌'}</span>
-                        <span class="device-name">${device.name}</span>
+                        <span class="device-emoji">${esc(device.emoji || '🔌')}</span>
+                        <span class="device-name">${esc(device.name)}</span>
                     </div>
                     <div class="device-status">
                         <span class="status-dot ${isOn ? 'on' : 'off'}"></span>
@@ -220,7 +226,7 @@
                     </div>
                     <button
                         class="device-btn ${isOn ? 'turn-off' : 'turn-on'}"
-                        data-entity-id="${entityId}"
+                        data-entity-id="${esc(entityId)}"
                         data-action="${isOn ? 'turn_off' : 'turn_on'}"
                         ${!isEnabled ? 'disabled' : ''}
                     >
@@ -306,9 +312,9 @@
         if (isActive && (mediaTitle || appName)) {
             mediaInfo = `
                 <div class="media-info">
-                    ${mediaTitle ? `<div class="media-title">${mediaTitle}</div>` : ''}
-                    ${mediaArtist ? `<div class="media-artist">${mediaArtist}</div>` : ''}
-                    ${appName ? `<div class="media-app">${appName}</div>` : ''}
+                    ${mediaTitle ? `<div class="media-title">${esc(mediaTitle)}</div>` : ''}
+                    ${mediaArtist ? `<div class="media-artist">${esc(mediaArtist)}</div>` : ''}
+                    ${appName ? `<div class="media-app">${esc(appName)}</div>` : ''}
                 </div>
             `;
         } else if (isOn && !isActive) {
@@ -320,32 +326,32 @@
         }
 
         return `
-            <div class="device-card media-player-card ${disabledClass}" data-entity-id="${entityId}">
+            <div class="device-card media-player-card ${disabledClass}" data-entity-id="${esc(entityId)}">
                 <div class="device-header">
-                    <span class="device-emoji">${device.emoji || '📺'}</span>
-                    <span class="device-name">${device.name}</span>
+                    <span class="device-emoji">${esc(device.emoji || '📺')}</span>
+                    <span class="device-name">${esc(device.name)}</span>
                 </div>
                 <div class="media-state">
-                    <span class="media-state-badge ${state}">${stateLabel}</span>
+                    <span class="media-state-badge ${esc(state)}">${esc(stateLabel)}</span>
                 </div>
                 ${mediaInfo}
                 <div class="media-buttons">
                     <button
                         class="media-btn play ${isPlaying ? 'active' : ''}"
-                        data-entity-id="${entityId}"
+                        data-entity-id="${esc(entityId)}"
                         data-action="media_play"
                         ${!isEnabled || !isActive ? 'disabled' : ''}
                     >▶ Play</button>
                     <button
                         class="media-btn pause ${isPaused ? 'active' : ''}"
-                        data-entity-id="${entityId}"
+                        data-entity-id="${esc(entityId)}"
                         data-action="media_pause"
                         ${!isEnabled || !isActive ? 'disabled' : ''}
                     >⏸ Pause</button>
                 </div>
                 <button
                     class="device-btn media-power-btn ${isOn ? 'turn-off' : 'turn-on'}"
-                    data-entity-id="${entityId}"
+                    data-entity-id="${esc(entityId)}"
                     data-action="${isOn ? 'turn_off' : 'turn_on'}"
                     ${!isEnabled ? 'disabled' : ''}
                 >${isOn ? 'Turn Off' : 'Turn On'}</button>
@@ -714,6 +720,9 @@
                 });
             }
             isInitialLoad = false;
+        }, (error) => {
+            console.error('Failed to load activity log:', error);
+            activityLog.innerHTML = '<li class="activity-placeholder">Couldn\'t load recent activity</li>';
         });
 
         // Listen specifically for new entries (more reliable than value for detecting additions)
@@ -754,6 +763,8 @@
             refreshDebounceTimer = setTimeout(() => {
                 fetchDevices();
             }, 2000);
+        }, (error) => {
+            console.error('Activity log listener cancelled:', error);
         });
     }
 
@@ -810,7 +821,7 @@
                 <li>
                     <span class="activity-action">
                         <span class="${actionClass}">Someone ${actionText}</span>
-                        <strong>${log.deviceName || log.entity_id}</strong>
+                        <strong>${esc(log.deviceName || log.entity_id)}</strong>
                     </span>
                     <span class="activity-time">${timeAgo}</span>
                 </li>

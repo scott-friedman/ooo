@@ -79,10 +79,23 @@
     let previewScene, previewCamera, previewRenderer;
 
     /**
-     * Check if current user is admin
+     * Check if current user is admin: the localStorage flag set on admin.html
+     * AND a live auth session on this page (defense in depth; the database
+     * rule is the real gate).
      */
     function isAdmin() {
-        return localStorage.getItem('admin_auth') === 'true';
+        return localStorage.getItem('admin_auth') === 'true'
+            && !!(window.firebase && firebase.auth && firebase.auth().currentUser);
+    }
+
+    /**
+     * Show/hide delete buttons based on admin status (auth restores async)
+     */
+    function refreshDeleteButtons() {
+        const show = isAdmin();
+        document.querySelectorAll('.figurine-delete').forEach(btn => {
+            btn.style.display = show ? '' : 'none';
+        });
     }
 
     /**
@@ -447,12 +460,20 @@
         storage = firebase.storage();
         figurinesRef = db.ref('figurines');
 
+        // Delete buttons only show for a signed-in admin; auth restores async
+        if (firebase.auth) {
+            firebase.auth().onAuthStateChanged(() => refreshDeleteButtons());
+        }
+
         // Listen for figurines
         figurinesRef.on('child_added', (snapshot) => {
             const figurine = snapshot.val();
             const id = snapshot.key;
             figurines[id] = figurine;
             loadFigurine(id, figurine);
+        }, (error) => {
+            console.error('Failed to load figurines:', error);
+            showLoadError();
         });
 
         figurinesRef.on('child_changed', (snapshot) => {
@@ -469,6 +490,18 @@
             removeFigurine3D(id);
         });
 
+    }
+
+    /**
+     * Show a visible error when figurines can't be loaded
+     */
+    function showLoadError() {
+        if (document.getElementById('figurines-load-error')) return;
+        const msg = document.createElement('div');
+        msg.id = 'figurines-load-error';
+        msg.textContent = "Couldn't load figurines. Try refreshing the page.";
+        msg.style.cssText = 'position:fixed;top:5rem;left:50%;transform:translateX(-50%);background:#fff3f3;color:#c0392b;border:1px solid #e0b4b4;padding:0.5rem 1rem;border-radius:6px;z-index:100;';
+        document.body.appendChild(msg);
     }
 
     /**
@@ -758,8 +791,8 @@
         overlay.dataset.figurineOverlay = id;
         overlay.innerHTML = `
             <div class="figurine-header">
-                <div class="figurine-name">${figurine.name || 'Figurine'}</div>
-                <button class="figurine-delete" data-delete-id="${id}" title="Delete figurine">
+                <div class="figurine-name">${Sanitize.escapeHtml(figurine.name || 'Figurine')}</div>
+                <button class="figurine-delete" data-delete-id="${Sanitize.escapeHtml(id)}" title="Delete figurine" aria-label="Delete figurine">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -797,8 +830,10 @@
             transition: opacity 0.2s;
         `;
 
-        // Add delete handler
+        // Add delete handler (button is a UI hint — the database rule is the
+        // real gate; only admins can delete)
         const deleteBtn = overlay.querySelector('.figurine-delete');
+        if (!isAdmin()) deleteBtn.style.display = 'none';
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteFigurine(id);
@@ -811,40 +846,16 @@
      * Delete a figurine
      */
     function deleteFigurine(id) {
+        if (!isAdmin()) return;
         if (!confirm('Delete this figurine?')) return;
 
-        // Remove from Firebase
-        figurinesRef.child(id).remove();
-
-        // Remove 3D object from scene
-        const obj = figurineObjects[id];
-        if (obj && obj.model) {
-            scene.remove(obj.model);
-            // Dispose of geometry and materials
-            obj.model.traverse((child) => {
-                if (child.isMesh) {
-                    if (child.geometry) child.geometry.dispose();
-                    if (child.material) {
-                        if (Array.isArray(child.material)) {
-                            child.material.forEach(m => m.dispose());
-                        } else {
-                            child.material.dispose();
-                        }
-                    }
-                }
+        // Remove from Firebase; the child_removed listener handles scene
+        // cleanup, so a rejected delete leaves the figurine intact
+        figurinesRef.child(id).remove()
+            .catch((error) => {
+                console.error('Failed to delete figurine:', error);
+                alert('Failed to delete figurine: ' + error.message);
             });
-        }
-        delete figurineObjects[id];
-
-        // Remove stat overlay
-        const overlay = document.querySelector(`[data-figurine-overlay="${id}"]`);
-        if (overlay) overlay.remove();
-
-        // Remove from local state
-        delete figurines[id];
-
-        // Stop any sleep particles
-        stopSleepParticles(id);
     }
 
     /**
@@ -987,6 +998,19 @@
         if (obj) {
             if (obj.model) {
                 scene.remove(obj.model);
+                // Dispose of geometry and materials
+                obj.model.traverse((child) => {
+                    if (child.isMesh) {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    }
+                });
             }
             delete figurineObjects[id];
         }

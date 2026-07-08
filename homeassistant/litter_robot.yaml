@@ -132,6 +132,13 @@
 # REST COMMANDS (add to configuration.yaml under rest_command:)
 # =============================================================================
 #
+# AUTH REQUIRED (since the 2026-04-02 rules deploy): the litterrobot path is
+# no longer publicly writable, so every URL below carries ?auth=<secret>.
+# Replace YOUR_FIREBASE_DB_SECRET with the database secret from
+# Firebase console > Project settings > Service accounts > Database secrets
+# (project scottfriedman-f400d). Keep the real secret out of any public repo —
+# it lives only in your HA configuration.yaml.
+#
 # IMPORTANT: These should be DIRECT children of rest_command: in your config
 # Do NOT copy the "rest_command:" line if you already have one - just add
 # the individual commands under your existing rest_command: section.
@@ -140,7 +147,7 @@
 #
 # rest_command:
 #   push_litterrobot_current:
-#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/current.json"
+#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/current.json?auth=YOUR_FIREBASE_DB_SECRET"
 #     method: PATCH
 #     content_type: "application/json"
 #     payload: >
@@ -156,13 +163,13 @@
 #       }
 #
 #   push_litterrobot_weight:
-#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}/weights.json"
+#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}/weights.json?auth=YOUR_FIREBASE_DB_SECRET"
 #     method: POST
 #     content_type: "application/json"
 #     payload: '{{ weight }}'
 #
 #   push_litterrobot_history:
-#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}.json"
+#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}.json?auth=YOUR_FIREBASE_DB_SECRET"
 #     method: PATCH
 #     content_type: "application/json"
 #     payload: >
@@ -179,7 +186,7 @@
 # --- REST COMMANDS (paste under your existing rest_command: section) ---
 
 #   push_litterrobot_current:
-#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/current.json"
+#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/current.json?auth=YOUR_FIREBASE_DB_SECRET"
 #     method: PATCH
 #     content_type: "application/json"
 #     payload: >
@@ -195,13 +202,13 @@
 #       }
 #
 #   push_litterrobot_weight:
-#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}/weights.json"
+#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}/weights.json?auth=YOUR_FIREBASE_DB_SECRET"
 #     method: POST
 #     content_type: "application/json"
 #     payload: '{{ weight }}'
 #
 #   push_litterrobot_history:
-#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}.json"
+#     url: "https://scottfriedman-f400d-default-rtdb.firebaseio.com/litterrobot/history/{{ now().strftime('%Y-%m-%d') }}.json?auth=YOUR_FIREBASE_DB_SECRET"
 #     method: PATCH
 #     content_type: "application/json"
 #     payload: >

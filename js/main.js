@@ -265,7 +265,9 @@
                     drawStroke(stroke.points, stroke.color, stroke.width);
                 }
             };
-            strokesRef.on('child_added', strokesCallback);
+            strokesRef.on('child_added', strokesCallback, (error) => {
+                console.error('Failed to load strokes:', error);
+            });
             firebaseListeners.push({ ref: strokesRef, event: 'child_added', callback: strokesCallback });
 
             // Listen for canvas clear events (only respond to NEW clears after page load)
@@ -282,7 +284,9 @@
                         lastClearedTimestamp = cleared;
                     }
                 };
-                clearRef.on('value', clearCallback);
+                clearRef.on('value', clearCallback, (error) => {
+                    console.error('Failed to watch canvas clears:', error);
+                });
                 firebaseListeners.push({ ref: clearRef, event: 'value', callback: clearCallback });
             });
 

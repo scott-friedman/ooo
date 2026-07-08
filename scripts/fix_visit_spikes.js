@@ -93,7 +93,9 @@ async function main() {
     if (apply) {
         const payload = JSON.stringify(corrections);
         console.log('\n--- CURL COMMAND (paste into terminal) ---\n');
-        console.log(`curl -X PATCH '${FIREBASE_URL}/litterrobot/history.json' \\`);
+        console.log('# litterrobot is not publicly writable; export the database secret first:');
+        console.log('# export FIREBASE_SECRET=<Firebase console > Project settings > Service accounts > Database secrets>');
+        console.log(`curl -X PATCH "${FIREBASE_URL}/litterrobot/history.json?auth=$FIREBASE_SECRET" \\`);
         console.log(`  -H 'Content-Type: application/json' \\`);
         console.log(`  -d '${payload}'`);
         console.log('\nNote: This uses multi-path PATCH — only the visits field is');

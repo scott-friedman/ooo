@@ -1086,7 +1086,14 @@ You can use HTML tags like:
                 });
         }
 
-        function esc(str) { return (str || '').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+        function esc(str) {
+            return String(str ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
         // ==================== Command Center ====================
 
@@ -1283,7 +1290,7 @@ You can use HTML tags like:
                         <span style="color: ${actionColor}; font-weight: 500;">
                             ${actionLabel}
                         </span>
-                        <span style="color: #333;">${log.deviceName || log.entity_id}</span>
+                        <span style="color: #333;">${esc(log.deviceName || log.entity_id)}</span>
                         <span style="color: #999; font-size: 0.75rem; float: right;">${time}</span>
                     </div>
                 `;

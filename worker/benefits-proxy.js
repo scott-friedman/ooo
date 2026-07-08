@@ -6,6 +6,9 @@
  *
  * Environment Variables (set via wrangler secret):
  * - GEMINI_API_KEY: Google AI Studio API key
+ * - FIREBASE_SECRET: RTDB database secret (wrangler secret put FIREBASE_SECRET
+ *   --config wrangler-benefits.toml) — required for cache writes; the rules
+ *   deny unauthenticated writes
  *
  * Optional KV Namespace (for persistent rate limiting):
  * - RATE_LIMIT_KV: KV namespace for rate limit counters
@@ -244,7 +247,7 @@ async function handleBenefits(request, env, corsHeaders) {
     }
 
     // Cache the result
-    await saveToCache(cacheKey, result);
+    await saveToCache(env, cacheKey, result);
 
     return jsonResponse({
         benefits: result.benefits,
@@ -361,10 +364,10 @@ async function checkCache(cacheKey) {
 /**
  * Save result to Firebase cache
  */
-async function saveToCache(cacheKey, result) {
+async function saveToCache(env, cacheKey, result) {
     try {
-        await fetch(
-            `${FIREBASE_URL}/benefits/cache/${cacheKey}.json`,
+        const response = await fetch(
+            `${FIREBASE_URL}/benefits/cache/${cacheKey}.json?auth=${env.FIREBASE_SECRET}`,
             {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -375,6 +378,9 @@ async function saveToCache(cacheKey, result) {
                 })
             }
         );
+        if (!response.ok) {
+            console.error('Cache write rejected:', response.status, await response.text());
+        }
     } catch (error) {
         console.error('Cache save failed:', error);
     }

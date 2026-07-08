@@ -8,6 +8,8 @@
  * - HA_URL: Your Nabu Casa URL (e.g., https://xxxxxxxx.ui.nabu.casa)
  * - HA_TOKEN: Long-Lived Access Token from Home Assistant
  * - FIREBASE_URL: Firebase Realtime Database URL
+ * - FIREBASE_SECRET: RTDB database secret (wrangler secret put FIREBASE_SECRET)
+ *   — required for activity-log writes; the rules deny public writes
  *
  * Deploy: wrangler deploy
  */
@@ -170,8 +172,8 @@ async function getAllowedDevices(env) {
  */
 async function logAction(env, entityId, action, deviceName) {
     try {
-        await fetch(
-            `${env.FIREBASE_URL}/commandcenter/log.json`,
+        const response = await fetch(
+            `${env.FIREBASE_URL}/commandcenter/log.json?auth=${env.FIREBASE_SECRET}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -183,6 +185,9 @@ async function logAction(env, entityId, action, deviceName) {
                 })
             }
         );
+        if (!response.ok) {
+            console.error('Log write rejected:', response.status, await response.text());
+        }
     } catch (error) {
         console.error('Failed to log action:', error);
     }

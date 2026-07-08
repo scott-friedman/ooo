@@ -40,14 +40,18 @@
 
     /**
      * Escape HTML entities - use this for plain text content
+     * Escapes quotes too, so output is also safe inside attribute values.
      * @param {string} str - String to escape
      * @returns {string} Escaped string safe for innerHTML
      */
     function escapeHtml(str) {
         if (str === null || str === undefined) return '';
-        const div = document.createElement('div');
-        div.textContent = String(str);
-        return div.innerHTML;
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     /**
