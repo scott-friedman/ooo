@@ -1201,7 +1201,11 @@
         `;
         container.appendChild(tag);
         const obj = figurineObjects[id];
-        if (obj) obj.tagEl = tag;
+        if (obj) {
+            obj.tagEl = tag;
+            // Measured once - the name never changes, so neither does the size
+            obj.tagSize = { w: tag.offsetWidth, h: tag.offsetHeight };
+        }
         updateTagStats(id, figurine);
     }
 
@@ -1242,17 +1246,20 @@
             const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
             obj.screenPos = { x, y };
 
+            // Tags and card render translated (-50%, -100%) above this anchor;
+            // clamp so they stay fully on screen wherever the figurine is
             if (obj.tagEl) {
-                obj.tagEl.style.left = `${x}px`;
-                obj.tagEl.style.top = `${y}px`;
+                const halfW = (obj.tagSize?.w || 60) / 2;
+                const tagH = obj.tagSize?.h || 40;
+                obj.tagEl.style.left = `${Math.min(Math.max(x, halfW + 4), window.innerWidth - halfW - 4)}px`;
+                obj.tagEl.style.top = `${Math.min(Math.max(y, tagH + 6), window.innerHeight - 6)}px`;
                 obj.tagEl.classList.toggle('hidden', id === selectedId);
             }
 
             if (id === selectedId && card) {
-                card.style.left = `${x}px`;
-                // Keep the whole card on screen for figurines near the top
-                // (it renders translated -100% above this anchor)
-                card.style.top = `${Math.max(y, card.offsetHeight + 16)}px`;
+                const halfW = card.offsetWidth / 2;
+                card.style.left = `${Math.min(Math.max(x, halfW + 8), window.innerWidth - halfW - 8)}px`;
+                card.style.top = `${Math.min(Math.max(y, card.offsetHeight + 16), window.innerHeight - 8)}px`;
             }
         });
     }
