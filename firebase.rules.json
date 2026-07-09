@@ -212,26 +212,53 @@
       ".write": "auth != null && root.child('admins').child(auth.uid).exists() && !newData.exists()",
       "$figurineId": {
         ".write": "!data.exists() || (newData.exists() && newData.child('modelUrl').val() == data.child('modelUrl').val() && newData.child('name').val() == data.child('name').val()) || (auth != null && root.child('admins').child(auth.uid).exists())",
-        ".validate": "newData.hasChildren(['modelUrl', 'name', 'x', 'z']) &&
-                      newData.child('modelUrl').isString() &&
-                      newData.child('modelUrl').val().beginsWith('https://firebasestorage.googleapis.com/') &&
-                      newData.child('modelUrl').val().length <= 2048 &&
-                      newData.child('name').isString() &&
-                      newData.child('name').val().length >= 1 &&
-                      newData.child('name').val().length <= 60 &&
-                      newData.child('x').isNumber() &&
-                      newData.child('x').val() >= 0 &&
-                      newData.child('x').val() <= 100 &&
-                      newData.child('z').isNumber() &&
-                      newData.child('z').val() >= 0 &&
-                      newData.child('z').val() <= 100 &&
-                      (!newData.hasChild('rotationY') || newData.child('rotationY').isNumber()) &&
-                      (!newData.hasChild('state') || (newData.child('state').isString() && newData.child('state').val().length <= 60)) &&
-                      (!newData.hasChild('hunger') || (newData.child('hunger').isNumber() && newData.child('hunger').val() >= 0 && newData.child('hunger').val() <= 100)) &&
-                      (!newData.hasChild('happiness') || (newData.child('happiness').isNumber() && newData.child('happiness').val() >= 0 && newData.child('happiness').val() <= 100)) &&
-                      (!newData.hasChild('energy') || (newData.child('energy').isNumber() && newData.child('energy').val() >= 0 && newData.child('energy').val() <= 100)) &&
-                      (!newData.hasChild('lastInteraction') || newData.child('lastInteraction').isNumber())"
+        ".validate": "newData.hasChildren(['modelUrl', 'name', 'x', 'z'])",
+        "modelUrl": { ".validate": "newData.isString() && newData.val().beginsWith('https://firebasestorage.googleapis.com/') && newData.val().length <= 2048" },
+        "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "x": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "z": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "rotationY": { ".validate": "newData.isNumber()" },
+        "state": { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "hunger": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "happiness": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "energy": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "lastInteraction": { ".validate": "newData.isNumber()" },
+        // Timestamp of the last authoritative stat write (client materializes
+        // effective stats on interaction; the keeper worker on its cron)
+        "statsUpdatedAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" },
+        // Shared stroll path: every client animates position from this via
+        // timestamp math; removed (null) when the stroll ends
+        "walk": {
+          ".validate": "newData.hasChildren(['fromX', 'fromZ', 'toX', 'toZ', 'startedAt', 'duration'])",
+          "fromX": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+          "fromZ": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+          "toX": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+          "toZ": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+          "startedAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" },
+          "duration": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 60000" },
+          "$other": { ".validate": false }
+        },
+        "$other": { ".validate": false }
       }
+    },
+
+    // ========================================
+    // CARETAKERS - Worker-only (database secret bypasses rules)
+    // Holds email addresses; must NEVER be publicly readable.
+    // ========================================
+    "caretakers": {
+      ".read": false,
+      ".write": false
+    },
+    // Public caretaker counts per figurine, maintained by the keeper worker
+    "caretakerCounts": {
+      ".read": true,
+      ".write": false
+    },
+    // Notification cooldown state, worker-only
+    "notifyState": {
+      ".read": false,
+      ".write": false
     },
 
     // ========================================

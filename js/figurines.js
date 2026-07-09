@@ -1,6 +1,16 @@
 /**
  * Figurine Playground - 3D Interactive Virtual Pets
- * Three.js powered figurines with animations
+ *
+ * Shared world: every visitor sees the same figurines in the same places.
+ * - Movement is calm: mostly idle with an occasional short stroll. Strolls are
+ *   written to Firebase as a `walk` object and every client (including the
+ *   initiator) animates position from it with timestamp math, so motion is
+ *   smooth and identical everywhere.
+ * - Stats decay in real time. The figurines-keeper worker is the only
+ *   authoritative decay writer; clients render "effective" stats computed
+ *   from the stored value + statsUpdatedAt, and materialize them on writes.
+ * - Click a figurine to open its card (stats, Pet/Feed/Dance/Sleep,
+ *   caretaker signup). Drag still moves it.
  */
 
 (function() {
@@ -8,19 +18,46 @@
 
     const FIREBASE_CONFIG = getFirebaseConfig('main');  // js/firebase-config.js, loaded first on every page
 
-    // Constants
-    const STAT_DECAY_INTERVAL = 60000;
-    const IDLE_WANDER_INTERVAL = 3000; // Check for wandering more frequently (Mii-like)
-    const HUNGER_DECAY_RATE = 2;
-    const HAPPINESS_DECAY_RATE = 1;
-    const ENERGY_DECAY_RATE = 1;
-    const ENERGY_RECOVERY_RATE = 5;
-    const WALK_SPEED = 0.015; // Slightly slower for more natural movement
-    const COLLISION_RADIUS = 0.4; // Collision distance between figurines (world units)
-    const MIN_WANDER_DISTANCE = 5; // Minimum wander distance in grid units
-    const MAX_WANDER_DISTANCE = 20; // Maximum wander distance in grid units
+    const KEEPER_URL = 'https://figurines-keeper.s-friedman.workers.dev';
 
-    // System animations to exclude from emotes (custom user animations)
+    // Decay tuning - MUST match worker/figurines-keeper.js RATES. Clients only
+    // use these to render effective stats between authoritative writes.
+    const RATES = {
+        hungerPerHour: 1.05,
+        happinessPerHour: 0.78,
+        energyPerHour: 0.625,
+        energyDancingMultiplier: 2,
+        energySleepRecoveryPerHour: 20
+    };
+
+    // Movement: calm & clickable
+    const STROLL_MIN_DELAY = 45000;   // ms between stroll considerations
+    const STROLL_MAX_DELAY = 120000;
+    const STROLL_MIN_DIST = 3;        // grid units
+    const STROLL_MAX_DIST = 8;
+    const STROLL_SPEED = 0.25;        // world units per second (grid / 10)
+    const PROXIMITY_PAUSE_PX = 120;   // cursor this close = no strolling
+    const COLLISION_RADIUS = 0.4;     // world units between figurines
+
+    // Mood thresholds
+    const HUNGRY_THRESHOLD = 30;      // mopey + pizza thoughts below this
+    const SAD_THRESHOLD = 30;
+    const AUTO_SLEEP_ENERGY = 15;
+    const HAPPY_BURST_THRESHOLD = 85;
+    const FEED_REFUSE_ABOVE = 90;
+    // Below these, a stat's sliver pulses and its need emoji floats up
+    const LOW_THRESHOLDS = {
+        hunger: HUNGRY_THRESHOLD,
+        happiness: SAD_THRESHOLD,
+        energy: AUTO_SLEEP_ENERGY
+    };
+
+    // Pet diminishing returns within a rolling 60s window per figurine
+    const PET_DELTAS = [15, 8, 3, 1];
+    const PET_WINDOW_MS = 60000;
+
+    // Known system clip names - the fallback pool switchAnimation uses when a
+    // state has no direct match in its animMap (never custom user animations)
     const SYSTEM_ANIMATIONS = ['idle', 'idle_loop', 'walk', 'walking', 'walk_loop',
                                'dance', 'dancing', 'dance_loop', 'sleep', 'sleeping',
                                'sit', 'sit_idle', 'eat', 'eating', 'chew', 'breathing_idle'];
@@ -29,6 +66,7 @@
     const HEARTS = ['❤️', '💕', '💖', '💗', '💓'];
     const FOODS = ['🍕', '🍔', '🌮', '🍩', '🍪', '🍰', '🧁', '🍦'];
     const ZZZ = ['Z', 'z', 'Z'];
+    const NEED_EMOJI = { hunger: '🍕', happiness: '💔', energy: '😴' };
 
     // Three.js objects
     let scene, camera, renderer;
@@ -39,35 +77,72 @@
     let db = null;
     let storage = null;
     let figurinesRef = null;
+    let serverTimeOffset = 0;
     const figurines = {};
-    const figurineObjects = {}; // Three.js objects
-    let currentTool = 'move';
-    let showStats = false;
+    const figurineObjects = {}; // Three.js objects + per-figurine client state
+    let caretakerCounts = {};
+    let selectedId = null;
 
-    // Drag state
+    // Walks this client initiated (this client is responsible for finishing them)
+    const initiatedWalks = new Set();
+
+    // Pointer state
+    let pointerDown = null; // { id, x, y } while pressing on a figurine
     let isDragging = false;
     let draggedFigurine = null;
     let dragPlane;
+    const pointerScreen = { x: -9999, y: -9999 };
+    let lastProximityCheck = 0;
 
-    // Walking targets for smooth movement
-    const walkingTargets = {}; // { figurineId: { x, z, startTime } }
+    // Pet diminishing-returns history: id -> [timestamps]
+    const petHistory = {};
 
     // DOM Elements
     const canvas = document.getElementById('figurine-canvas');
     const container = document.getElementById('figurines-container');
     const particlesContainer = document.getElementById('particles-container');
-    const toolbar = document.querySelector('.figurine-toolbar');
-    const toggleStatsBtn = document.getElementById('toggle-stats');
     const addFigurineBtn = document.getElementById('add-figurine-btn');
     const uploadModal = document.getElementById('upload-modal');
+    let card = null; // the single figurine card element, created lazily
 
     // Intervals
-    let statDecayInterval = null;
-    let idleWanderInterval = null;
     let sleepParticleIntervals = {};
 
     // Preview scene for upload modal
     let previewScene, previewCamera, previewRenderer;
+
+    /**
+     * Server-corrected clock. Walk interpolation and statsUpdatedAt math use
+     * this so clients with skewed clocks agree on where everything is.
+     */
+    function now() {
+        return Date.now() + serverTimeOffset;
+    }
+
+    function clampStat(v) {
+        return Math.max(0, Math.min(100, v));
+    }
+
+    function round2(v) {
+        return Math.round(v * 100) / 100;
+    }
+
+    function easeInOutQuad(t) {
+        return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    }
+
+    /**
+     * Deterministic pseudo-random in [0,1) from a string. Used so all clients
+     * agree on "spontaneous" behavior windows without any writes.
+     */
+    function hashFrac(str) {
+        let h = 2166136261;
+        for (let i = 0; i < str.length; i++) {
+            h ^= str.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return ((h >>> 0) % 100000) / 100000;
+    }
 
     /**
      * Check if current user is admin: the localStorage flag set on admin.html
@@ -79,19 +154,80 @@
             && !!(window.firebase && firebase.auth && firebase.auth().currentUser);
     }
 
+    // =========================================================================
+    // Effective stats - stored value + decay since statsUpdatedAt
+    // =========================================================================
+
+    function effectiveStats(figurine) {
+        const last = typeof figurine.statsUpdatedAt === 'number' ? figurine.statsUpdatedAt : now();
+        const hours = Math.max(0, (now() - last) / 3600000);
+        const state = figurine.state || 'idle';
+
+        let energyRate;
+        if (state === 'sleeping') {
+            energyRate = RATES.energySleepRecoveryPerHour;
+        } else if (state === 'dancing') {
+            energyRate = -RATES.energyPerHour * RATES.energyDancingMultiplier;
+        } else {
+            energyRate = -RATES.energyPerHour;
+        }
+
+        return {
+            hunger: clampStat((figurine.hunger ?? 80) - RATES.hungerPerHour * hours),
+            happiness: clampStat((figurine.happiness ?? 80) - RATES.happinessPerHour * hours),
+            energy: clampStat((figurine.energy ?? 80) + energyRate * hours)
+        };
+    }
+
     /**
-     * Show/hide delete buttons based on admin status (auth restores async)
+     * Update a figurine, logging (instead of silently dropping) rules
+     * rejections - every client write goes through here.
      */
-    function refreshDeleteButtons() {
-        const show = isAdmin();
-        document.querySelectorAll('.figurine-delete').forEach(btn => {
-            btn.style.display = show ? '' : 'none';
+    function fbUpdate(id, updates) {
+        figurinesRef.child(id).update(updates).catch((error) => {
+            console.error(`Figurine update failed for ${id}:`, error);
         });
     }
 
     /**
-     * Initialize Three.js scene
+     * Write an interaction: materialize all three effective stats (so the
+     * shared statsUpdatedAt baseline stays correct), apply deltas, and stamp
+     * timestamps. Reads current data at write time - no stale closures.
      */
+    function writeStats(id, deltas = {}, extra = {}) {
+        const figurine = figurines[id];
+        if (!figurine) return;
+        const stats = effectiveStats(figurine);
+        fbUpdate(id, {
+            hunger: round2(clampStat(stats.hunger + (deltas.hunger || 0))),
+            happiness: round2(clampStat(stats.happiness + (deltas.happiness || 0))),
+            energy: round2(clampStat(stats.energy + (deltas.energy || 0))),
+            statsUpdatedAt: now(),
+            lastInteraction: now(),
+            ...extra
+        });
+    }
+
+    /**
+     * Fields that safely cancel a walk (active OR stale): pin the figurine at
+     * its currently rendered position so no client snaps it back to the
+     * stroll's start coordinates. Empty when there is no walk to cancel.
+     */
+    function walkClearFields(id) {
+        const figurine = figurines[id];
+        const obj = figurineObjects[id];
+        if (!figurine || !figurine.walk || !obj || !obj.model) return {};
+        return {
+            walk: null,
+            x: round2(Math.max(0, Math.min(100, obj.model.position.x * 10 + 50))),
+            z: round2(Math.max(0, Math.min(100, obj.model.position.z * 10 + 50)))
+        };
+    }
+
+    // =========================================================================
+    // Three.js setup
+    // =========================================================================
+
     function initThreeJS() {
         // Scene
         scene = new THREE.Scene();
@@ -188,9 +324,6 @@
         animate();
     }
 
-    /**
-     * Window resize handler
-     */
     function onWindowResize() {
         const aspect = window.innerWidth / window.innerHeight;
         const frustumSize = 10;
@@ -204,245 +337,393 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    /**
-     * Animation loop
-     */
+    // =========================================================================
+    // Animation loop
+    // =========================================================================
+
     function animate() {
         requestAnimationFrame(animate);
 
         const delta = clock.getDelta();
+        const t = now();
 
-        // Update all figurine animations
-        Object.values(figurineObjects).forEach(obj => {
-            if (obj.mixer) {
-                obj.mixer.update(delta);
+        Object.entries(figurineObjects).forEach(([id, obj]) => {
+            if (!obj.model) return;
+            const figurine = figurines[id];
+            if (!figurine) return;
+
+            updateMotion(id, obj, figurine, delta, t);
+
+            // Drive animation clips from the effective state (walk presence,
+            // spontaneous bursts, then the stored state)
+            const animState = effectiveState(id, figurine, t);
+            if (obj.hasAnimations && animState !== obj.lastAnimState) {
+                switchAnimation(obj, animState);
+            }
+            obj.lastAnimState = animState;
+
+            if (obj.mixer) obj.mixer.update(delta);
+            if (!obj.hasAnimations) {
+                updateProceduralAnimation(id, obj, figurine, animState, t);
             }
 
-            // Procedural animations for models without embedded animations
-            if (obj.model && !obj.hasAnimations) {
-                updateProceduralAnimation(obj, delta);
+            // Feed-refusal head shake works for both animated and procedural models
+            if (obj.refuseUntil && obj.refuseUntil > t) {
+                obj.model.rotation.y = obj.baseRotationY + Math.sin(t * 0.045) * 0.3;
             }
-
-            // Smooth walking towards targets
-            updateWalking(obj, delta);
         });
 
         renderer.render(scene, camera);
 
-        // Update stat overlays position
-        updateStatOverlays();
+        updateHudPositions();
     }
 
     /**
-     * Check if a position would collide with other figurines
+     * What the figurine is visibly doing right now, independent of what the
+     * database `state` field says: an active walk always renders as walking,
+     * and very happy figurines break into short deterministic dance bursts
+     * that every client computes identically (no writes involved).
      */
-    function checkCollision(id, newX, newZ) {
-        for (const [otherId, otherObj] of Object.entries(figurineObjects)) {
-            if (otherId === id || !otherObj.model) continue;
+    function effectiveState(id, figurine, t) {
+        if (activeWalk(figurine, t)) return 'walking';
+        if (burstActive(id, figurine, t)) return 'dancing';
+        return figurine.state || 'idle';
+    }
 
-            const dx = newX - otherObj.model.position.x;
-            const dz = newZ - otherObj.model.position.z;
-            const distance = Math.sqrt(dx * dx + dz * dz);
+    function activeWalk(figurine, t) {
+        const walk = figurine.walk;
+        if (!walk || typeof walk.startedAt !== 'number' || typeof walk.duration !== 'number') return null;
+        if (t >= walk.startedAt + walk.duration) return null; // stale = arrived
+        return walk;
+    }
 
-            if (distance < COLLISION_RADIUS) {
-                return { collided: true, otherId, otherObj };
+    function burstActive(id, figurine, t) {
+        if ((figurine.state || 'idle') !== 'idle' || figurine.walk) return false;
+        const win = Math.floor(t / 90000);
+        if (t - win * 90000 > 6000) return false;      // bursts occupy the first 6s of a 90s window
+        if (hashFrac(id + ':' + win) >= 0.2) return false;
+        return effectiveStats(figurine).happiness > HAPPY_BURST_THRESHOLD;
+    }
+
+    /**
+     * Position + facing every frame. Walking figurines interpolate the shared
+     * walk path by timestamp (deterministic on every client). Idle figurines
+     * ease toward the authoritative x/z each frame, which keeps remote drags
+     * smooth (the old code lerped once per database event and crept 10% per
+     * update - that was the janky remote movement bug).
+     */
+    function updateMotion(id, obj, figurine, delta, t) {
+        if (isDragging && draggedFigurine === id) return;
+
+        const walk = figurine.walk;
+        if (walk && typeof walk.startedAt === 'number' && typeof walk.duration === 'number') {
+            const progress = Math.min(1, Math.max(0, (t - walk.startedAt) / walk.duration));
+            const eased = easeInOutQuad(progress);
+            const gx = walk.fromX + (walk.toX - walk.fromX) * eased;
+            const gz = walk.fromZ + (walk.toZ - walk.fromZ) * eased;
+            obj.model.position.x = (gx - 50) / 10;
+            obj.model.position.z = (gz - 50) / 10;
+
+            // Face the walking direction, smoothly
+            const dx = walk.toX - walk.fromX;
+            const dz = walk.toZ - walk.fromZ;
+            if (progress < 1 && (dx !== 0 || dz !== 0)) {
+                const targetRotation = Math.atan2(dx, dz);
+                let diff = targetRotation - obj.model.rotation.y;
+                while (diff > Math.PI) diff -= 2 * Math.PI;
+                while (diff < -Math.PI) diff += 2 * Math.PI;
+                obj.model.rotation.y += diff * Math.min(1, delta * 8);
+                obj.baseRotationY = obj.model.rotation.y;
             }
-        }
-        return { collided: false };
-    }
 
-    /**
-     * Get avoidance direction when collision detected
-     */
-    function getAvoidanceDirection(obj, otherObj) {
-        const dx = obj.model.position.x - otherObj.model.position.x;
-        const dz = obj.model.position.z - otherObj.model.position.z;
-        const length = Math.sqrt(dx * dx + dz * dz) || 0.01;
-        return { x: dx / length, z: dz / length };
-    }
-
-    /**
-     * Update smooth walking movement
-     */
-    function updateWalking(obj, delta) {
-        const target = walkingTargets[obj.id];
-        if (!target || !obj.model) return;
-
-        const figurine = figurines[obj.id];
-        if (!figurine || figurine.state !== 'walking') {
-            delete walkingTargets[obj.id];
+            // The initiator finishes the walk: final position written, walk cleared
+            if (progress >= 1 && initiatedWalks.has(id)) {
+                finishWalk(id, walk.toX, walk.toZ);
+            }
             return;
         }
 
-        // Calculate target position in world coordinates
-        const targetX = (target.x - 50) / 10;
-        const targetZ = (target.z - 50) / 10;
-
-        // Current position
-        const currentX = obj.model.position.x;
-        const currentZ = obj.model.position.z;
-
-        // Calculate distance to target
-        const dx = targetX - currentX;
-        const dz = targetZ - currentZ;
-        const distance = Math.sqrt(dx * dx + dz * dz);
-
-        // If close enough to target, stop walking
-        if (distance < 0.05) {
-            // Update Firebase with final position and rotation
-            figurinesRef.child(obj.id).update({
-                state: 'idle',
-                x: target.x,
-                z: target.z,
-                rotationY: obj.baseRotationY // Preserve final facing direction
-            });
-            delete walkingTargets[obj.id];
-            return;
-        }
-
-        // Move towards target
-        const moveSpeed = WALK_SPEED * 60 * delta; // Normalize for frame rate
-        const moveAmount = Math.min(moveSpeed, distance);
-        let moveX = (dx / distance) * moveAmount;
-        let moveZ = (dz / distance) * moveAmount;
-
-        // Check for collision at new position
-        const newX = currentX + moveX;
-        const newZ = currentZ + moveZ;
-        const collision = checkCollision(obj.id, newX, newZ);
-
-        if (collision.collided) {
-            // Get avoidance direction (away from the other figurine)
-            const avoidDir = getAvoidanceDirection(obj, collision.otherObj);
-
-            // Blend avoidance with original direction
-            moveX = moveX * 0.3 + avoidDir.x * moveAmount * 0.7;
-            moveZ = moveZ * 0.3 + avoidDir.z * moveAmount * 0.7;
-
-            // Check if still colliding after adjustment
-            const adjustedX = currentX + moveX;
-            const adjustedZ = currentZ + moveZ;
-            const stillColliding = checkCollision(obj.id, adjustedX, adjustedZ);
-
-            if (stillColliding.collided) {
-                // Stop and pick a new destination
-                delete walkingTargets[obj.id];
-                figurinesRef.child(obj.id).update({
-                    state: 'idle',
-                    x: (currentX * 10) + 50,
-                    z: (currentZ * 10) + 50,
-                    rotationY: obj.baseRotationY // Preserve facing direction
-                });
-                return;
-            }
-        }
-
-        obj.model.position.x += moveX;
-        obj.model.position.z += moveZ;
-
-        // Face movement direction (smooth rotation)
-        const targetRotation = Math.atan2(moveX, moveZ);
-        const currentRotation = obj.model.rotation.y;
-        const rotationDiff = targetRotation - currentRotation;
-
-        // Normalize rotation difference to -PI to PI
-        let normalizedDiff = rotationDiff;
-        while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
-        while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
-
-        obj.model.rotation.y += normalizedDiff * 0.1; // Smooth rotation
-        obj.baseRotationY = obj.model.rotation.y;
+        // No active walk: ease toward the authoritative position
+        const targetX = ((figurine.x ?? 50) - 50) / 10;
+        const targetZ = ((figurine.z ?? 50) - 50) / 10;
+        const k = Math.min(1, delta * 6);
+        obj.model.position.x += (targetX - obj.model.position.x) * k;
+        obj.model.position.z += (targetZ - obj.model.position.z) * k;
     }
 
     /**
-     * Procedural animations for models without embedded animations
+     * Procedural animations for models without embedded animation clips.
+     * Mood-aware: hungry or sad figurines mope (slow bob, head down).
      */
-    function updateProceduralAnimation(obj, delta) {
-        const figurine = figurines[obj.id];
-        if (!figurine || !obj.model) return;
-
+    function updateProceduralAnimation(id, obj, figurine, state, t) {
         const time = clock.getElapsedTime();
-        const state = figurine.state || 'idle';
 
         // Use unique offset per figurine for desynchronized animations
-        const idOffset = obj.id ? obj.id.charCodeAt(0) * 0.1 : 0;
+        const idOffset = id ? id.charCodeAt(0) * 0.1 : 0;
         const personalTime = time + idOffset;
 
+        // Undo any dance/sleep scaling once the state moves on
+        if (state !== 'dancing' && state !== 'sleeping') {
+            obj.model.scale.setScalar(obj.baseScale);
+        }
+
         switch (state) {
-            case 'idle':
-                // Mii-like idle: gentle bobbing with occasional looking around
-                const bobSpeed = 1.5 + Math.sin(personalTime * 0.3) * 0.3; // Varying bob speed
-                obj.model.position.y = obj.baseY + Math.sin(personalTime * bobSpeed) * 0.03;
+            case 'idle': {
+                // cachedStats refreshes every 500ms in updateTagStats - plenty
+                // for a posture decision, and avoids per-frame recomputation
+                const stats = obj.cachedStats || effectiveStats(figurine);
+                const mopey = stats.hunger < HUNGRY_THRESHOLD || stats.happiness < SAD_THRESHOLD;
 
-                // Occasional head turns (looking around curiously)
-                const lookCycle = Math.sin(personalTime * 0.2) + Math.sin(personalTime * 0.7) * 0.5;
-                const lookAmount = lookCycle * 0.15; // More pronounced looking around
-                obj.model.rotation.y = obj.baseRotationY + lookAmount;
+                if (mopey) {
+                    // Slumped: slow shallow bob, head down, no curious looking
+                    obj.model.position.y = obj.baseY + Math.sin(personalTime * 0.8) * 0.015;
+                    obj.model.rotation.y = obj.baseRotationY;
+                    obj.model.rotation.x = 0.09;
+                    obj.model.rotation.z = 0;
+                } else {
+                    // Mii-like idle: gentle bobbing with occasional looking around
+                    const bobSpeed = 1.5 + Math.sin(personalTime * 0.3) * 0.3;
+                    obj.model.position.y = obj.baseY + Math.sin(personalTime * bobSpeed) * 0.03;
 
-                // Subtle weight shifting (lean side to side occasionally)
-                obj.model.rotation.z = Math.sin(personalTime * 0.4) * 0.02;
+                    const lookCycle = Math.sin(personalTime * 0.2) + Math.sin(personalTime * 0.7) * 0.5;
+                    obj.model.rotation.y = obj.baseRotationY + lookCycle * 0.15;
+                    obj.model.rotation.x = 0;
+                    obj.model.rotation.z = Math.sin(personalTime * 0.4) * 0.02;
+                }
                 break;
+            }
 
             case 'walking':
-                // Bobbing while moving
                 obj.model.position.y = obj.baseY + Math.abs(Math.sin(time * 8)) * 0.1;
+                obj.model.rotation.x = 0;
                 obj.model.rotation.z = Math.sin(time * 8) * 0.05;
                 break;
 
-            case 'dancing':
-                // Energetic movement
+            case 'dancing': {
                 obj.model.position.y = obj.baseY + Math.abs(Math.sin(time * 6)) * 0.2;
                 obj.model.rotation.y = obj.baseRotationY + Math.sin(time * 4) * 0.3;
+                obj.model.rotation.x = 0;
                 obj.model.rotation.z = Math.sin(time * 3) * 0.1;
                 const scale = 1 + Math.sin(time * 6) * 0.05;
                 obj.model.scale.setScalar(obj.baseScale * scale);
                 break;
+            }
 
-            case 'sleeping':
-                // Slow breathing
+            case 'sleeping': {
                 const breathe = 1 + Math.sin(time * 1) * 0.02;
                 obj.model.scale.set(obj.baseScale * breathe, obj.baseScale * (breathe * 0.98), obj.baseScale * breathe);
                 obj.model.position.y = obj.baseY - 0.1;
+                obj.model.rotation.x = 0;
                 break;
+            }
 
             case 'eating':
-                // Quick bobs
                 obj.model.position.y = obj.baseY + Math.abs(Math.sin(time * 10)) * 0.08;
-                break;
-
-            case 'emoting':
-                // Let the GLTF animation play without procedural interference
+                obj.model.rotation.x = 0;
                 break;
 
             default:
                 obj.model.position.y = obj.baseY;
+                obj.model.rotation.x = 0;
         }
     }
 
+    // =========================================================================
+    // Strolling - calm, occasional, synced
+    // =========================================================================
+
+    function checkCollision(id, newX, newZ) {
+        for (const [otherId, otherObj] of Object.entries(figurineObjects)) {
+            if (otherId === id || !otherObj.model) continue;
+
+            // Too close to where the other figurine currently is?
+            const dx = newX - otherObj.model.position.x;
+            const dz = newZ - otherObj.model.position.z;
+            if (Math.sqrt(dx * dx + dz * dz) < COLLISION_RADIUS * 2) {
+                return true;
+            }
+
+            // ...or to where its in-progress walk is headed?
+            const otherWalk = figurines[otherId]?.walk;
+            if (otherWalk) {
+                const wx = newX - (otherWalk.toX - 50) / 10;
+                const wz = newZ - (otherWalk.toZ - 50) / 10;
+                if (Math.sqrt(wx * wx + wz * wz) < COLLISION_RADIUS * 2) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /**
-     * Update HTML stat overlays to match 3D positions
+     * Consider starting a stroll for each figurine. Runs every second; each
+     * figurine has its own randomized 45-120s schedule (per-client jitter also
+     * makes N-tab initiation collisions rare - and they're harmless anyway,
+     * last write wins on a small object).
      */
-    function updateStatOverlays() {
-        Object.entries(figurineObjects).forEach(([id, obj]) => {
-            const overlay = document.querySelector(`[data-figurine-overlay="${id}"]`);
-            if (!overlay || !obj.model) return;
+    function considerStrolls() {
+        if (document.hidden) return;
+        const t = now();
 
-            // Project 3D position to screen
-            const vector = new THREE.Vector3();
-            obj.model.getWorldPosition(vector);
-            vector.project(camera);
+        Object.entries(figurines).forEach(([id, figurine]) => {
+            const obj = figurineObjects[id];
+            if (!obj || !obj.model) return;
 
-            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
-            const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
+            if (t < obj.nextStrollTime) return;
+            obj.nextStrollTime = t + STROLL_MIN_DELAY + Math.random() * (STROLL_MAX_DELAY - STROLL_MIN_DELAY);
 
-            overlay.style.left = `${x}px`;
-            overlay.style.top = `${y}px`;
+            // Only calm, unattended, idle figurines stroll
+            if ((figurine.state || 'idle') !== 'idle') return;
+            if (activeWalk(figurine, t)) return;
+            if (id === selectedId) return;
+            if (isDragging && draggedFigurine === id) return;
+            if (pointerNear(obj)) return;
+
+            // Current rendered position is the truth (handles stale walks)
+            const fromX = Math.max(0, Math.min(100, round2(obj.model.position.x * 10 + 50)));
+            const fromZ = Math.max(0, Math.min(100, round2(obj.model.position.z * 10 + 50)));
+
+            // Find a clear destination (up to 5 attempts)
+            let toX = null, toZ = null;
+            for (let attempt = 0; attempt < 5; attempt++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = STROLL_MIN_DIST + Math.random() * (STROLL_MAX_DIST - STROLL_MIN_DIST);
+                const candX = Math.max(15, Math.min(85, fromX + Math.cos(angle) * dist));
+                const candZ = Math.max(15, Math.min(85, fromZ + Math.sin(angle) * dist));
+                if (!checkCollision(id, (candX - 50) / 10, (candZ - 50) / 10)) {
+                    toX = round2(candX);
+                    toZ = round2(candZ);
+                    break;
+                }
+            }
+            if (toX === null) return;
+
+            const gridDist = Math.sqrt((toX - fromX) ** 2 + (toZ - fromZ) ** 2);
+            if (gridDist < 1) return;
+            const duration = Math.max(1000, Math.min(60000, Math.round((gridDist / 10) / STROLL_SPEED * 1000)));
+
+            initiatedWalks.add(id);
+            figurinesRef.child(id).update({
+                x: fromX,
+                z: fromZ,
+                walk: { fromX, fromZ, toX, toZ, startedAt: t, duration }
+            }).catch((error) => {
+                console.error('Failed to start stroll:', error);
+                initiatedWalks.delete(id);
+            });
         });
     }
 
     /**
-     * Initialize Firebase
+     * The initiator writes the final position and clears the walk.
      */
+    function finishWalk(id, gx, gz) {
+        initiatedWalks.delete(id);
+        const obj = figurineObjects[id];
+        fbUpdate(id, {
+            x: round2(Math.max(0, Math.min(100, gx))),
+            z: round2(Math.max(0, Math.min(100, gz))),
+            rotationY: obj && obj.model ? round2(obj.model.rotation.y) : 0,
+            walk: null
+        });
+    }
+
+    /**
+     * Stop an in-progress walk right now at the interpolated position.
+     * Used when the cursor gets close (initiator only), and when anyone
+     * clicks or starts dragging a strolling figurine.
+     */
+    function finishWalkEarly(id) {
+        const obj = figurineObjects[id];
+        if (!obj || !obj.model) return;
+        finishWalk(id, obj.model.position.x * 10 + 50, obj.model.position.z * 10 + 50);
+    }
+
+    function pointerNear(obj) {
+        if (!obj.screenPos) return false;
+        const dx = pointerScreen.x - obj.screenPos.x;
+        const dy = pointerScreen.y - obj.screenPos.y;
+        return Math.sqrt(dx * dx + dy * dy) < PROXIMITY_PAUSE_PX;
+    }
+
+    /**
+     * Cursor near a strolling figurine we initiated - stop it so it's clickable.
+     * Throttled from pointermove.
+     */
+    function checkProximityPause() {
+        const t = now();
+        if (t - lastProximityCheck < 200) return;
+        lastProximityCheck = t;
+
+        initiatedWalks.forEach((id) => {
+            const figurine = figurines[id];
+            const obj = figurineObjects[id];
+            if (!figurine || !obj) return;
+            if (activeWalk(figurine, t) && pointerNear(obj)) {
+                finishWalkEarly(id);
+            }
+        });
+    }
+
+    // =========================================================================
+    // Mood behaviors - visible consequences of the stats
+    // =========================================================================
+
+    function runMoodBehaviors() {
+        if (document.hidden) return;
+        const t = now();
+
+        Object.entries(figurines).forEach(([id, figurine]) => {
+            const obj = figurineObjects[id];
+            if (!obj || !obj.model) return;
+            const stats = effectiveStats(figurine);
+            const state = figurine.state || 'idle';
+
+            // Exhausted figurines put themselves to sleep. Random jitter +
+            // re-check keeps N open tabs from racing (harmless anyway).
+            if (stats.energy < AUTO_SLEEP_ENERGY && state !== 'sleeping' && state !== 'eating' && id !== selectedId) {
+                setTimeout(() => {
+                    const current = figurines[id];
+                    if (!current || current.state === 'sleeping') return;
+                    if (effectiveStats(current).energy >= AUTO_SLEEP_ENERGY) return;
+                    writeStats(id, {}, { state: 'sleeping', ...walkClearFields(id) });
+                }, Math.random() * 3000);
+            }
+
+            // Hungry (or sad) figurines daydream about what they're missing
+            if (stats.hunger < HUNGRY_THRESHOLD && state === 'idle' && Math.random() < 0.25) {
+                showThought(obj, NEED_EMOJI.hunger);
+            } else if (stats.happiness < SAD_THRESHOLD && state === 'idle' && Math.random() < 0.15) {
+                showThought(obj, NEED_EMOJI.happiness);
+            }
+
+            // Need emoji floats once when a stat crosses its low threshold
+            Object.entries(LOW_THRESHOLDS).forEach(([stat, threshold]) => {
+                const isLow = stats[stat] < threshold;
+                if (isLow && !obj.lowFlags[stat] && obj.screenPos) {
+                    spawnParticle(obj.screenPos.x, obj.screenPos.y - 20, 'heart', NEED_EMOJI[stat]);
+                }
+                obj.lowFlags[stat] = isLow;
+            });
+        });
+    }
+
+    function showThought(obj, content) {
+        if (!obj.screenPos) return;
+        const bubble = document.createElement('div');
+        bubble.className = 'thought-bubble';
+        bubble.textContent = content;
+        bubble.style.left = `${obj.screenPos.x + 26}px`;
+        bubble.style.top = `${obj.screenPos.y - 14}px`;
+        particlesContainer.appendChild(bubble);
+        setTimeout(() => bubble.remove(), 2500);
+    }
+
+    // =========================================================================
+    // Firebase
+    // =========================================================================
+
     function initFirebase() {
         if (!firebase.apps.length) {
             firebase.initializeApp(FIREBASE_CONFIG);
@@ -451,10 +732,22 @@
         storage = firebase.storage();
         figurinesRef = db.ref('figurines');
 
-        // Delete buttons only show for a signed-in admin; auth restores async
+        // Clock-skew correction for shared walk/stat timestamp math
+        db.ref('.info/serverTimeOffset').on('value', (snap) => {
+            serverTimeOffset = snap.val() || 0;
+        });
+
+        // Admin-only UI (delete button on the card) restores async
         if (firebase.auth) {
-            firebase.auth().onAuthStateChanged(() => refreshDeleteButtons());
+            firebase.auth().onAuthStateChanged(() => {
+                if (selectedId) renderCard();
+            });
         }
+
+        db.ref('caretakerCounts').on('value', (snap) => {
+            caretakerCounts = snap.val() || {};
+            if (selectedId) renderCardCaretakers();
+        });
 
         // Listen for figurines
         figurinesRef.on('child_added', (snapshot) => {
@@ -472,7 +765,7 @@
             const id = snapshot.key;
             const oldState = figurines[id]?.state;
             figurines[id] = figurine;
-            updateFigurine3D(id, figurine, oldState);
+            onFigurineChanged(id, figurine, oldState);
         });
 
         figurinesRef.on('child_removed', (snapshot) => {
@@ -480,12 +773,33 @@
             delete figurines[id];
             removeFigurine3D(id);
         });
-
     }
 
-    /**
-     * Show a visible error when figurines can't be loaded
-     */
+    function onFigurineChanged(id, figurine, oldState) {
+        // Walk gone (finished or cancelled by anyone) - release ownership so a
+        // stale entry can't make this client meddle with someone else's walk
+        if (!figurine.walk) initiatedWalks.delete(id);
+
+        const obj = figurineObjects[id];
+        if (obj) {
+            // Sync facing when idle (walk facing is computed per-frame locally)
+            if (figurine.rotationY !== undefined && !activeWalk(figurine, now()) &&
+                !(isDragging && draggedFigurine === id)) {
+                obj.baseRotationY = figurine.rotationY;
+            }
+        }
+
+        // Sleep particles follow the stored state
+        if (oldState !== 'sleeping' && figurine.state === 'sleeping') {
+            startSleepParticles(id);
+        } else if (oldState === 'sleeping' && figurine.state !== 'sleeping') {
+            stopSleepParticles(id);
+        }
+
+        updateTagStats(id, figurine);
+        if (selectedId === id) renderCardStats();
+    }
+
     function showLoadError() {
         if (document.getElementById('figurines-load-error')) return;
         const msg = document.createElement('div');
@@ -495,9 +809,10 @@
         document.body.appendChild(msg);
     }
 
-    /**
-     * Load a 3D figurine model
-     */
+    // =========================================================================
+    // Model loading (unchanged behavior)
+    // =========================================================================
+
     function loadFigurine(id, figurine) {
         // Skip entries without a valid modelUrl
         if (!figurine.modelUrl) {
@@ -507,9 +822,10 @@
 
         const loader = new THREE.GLTFLoader();
 
-        // Convert Firebase position to 3D world position
-        const worldX = ((figurine.x || 50) - 50) / 10;
-        const worldZ = ((figurine.z || 0) - 50) / 10;
+        // Convert Firebase position to 3D world position (?? not ||: 0 is a
+        // valid edge coordinate, and updateMotion defaults to 50 too)
+        const worldX = ((figurine.x ?? 50) - 50) / 10;
+        const worldZ = ((figurine.z ?? 50) - 50) / 10;
 
         // Handle data URLs differently from regular URLs
         if (figurine.modelUrl.startsWith('data:')) {
@@ -532,45 +848,25 @@
             return;
         }
 
-        console.log(`Loading model from URL: ${figurine.modelUrl}`);
-
         loader.load(
             figurine.modelUrl,
-            (gltf) => {
-                console.log(`Model loaded successfully for ${figurine.name}`, gltf);
-                onModelLoaded(gltf, id, figurine, worldX, worldZ);
-            },
-            (progress) => {
-                if (progress.total > 0) {
-                    console.log(`Loading ${figurine.name}: ${(progress.loaded / progress.total * 100).toFixed(0)}%`);
-                }
-            },
+            (gltf) => onModelLoaded(gltf, id, figurine, worldX, worldZ),
+            undefined,
             (error) => {
                 console.error(`Error loading model for ${figurine.name}:`, error);
-                console.error('Model URL was:', figurine.modelUrl);
                 createPlaceholder(id, figurine, worldX, worldZ);
             }
         );
     }
 
-    /**
-     * Handle loaded GLTF model
-     */
     function onModelLoaded(gltf, id, figurine, worldX, worldZ) {
         const model = gltf.scene;
-
-        console.log('Model scene:', model);
-        console.log('Model children:', model.children);
 
         // Check if model has any meshes
         let meshCount = 0;
         model.traverse((child) => {
-            if (child.isMesh) {
-                meshCount++;
-                console.log('Found mesh:', child.name, 'Material:', child.material);
-            }
+            if (child.isMesh) meshCount++;
         });
-        console.log(`Total meshes found: ${meshCount}`);
 
         if (meshCount === 0) {
             console.warn('No meshes found in model, creating placeholder');
@@ -578,7 +874,6 @@
             return;
         }
 
-        // Scale and position
         // Reset transforms on root
         model.position.set(0, 0, 0);
         model.rotation.set(0, 0, 0);
@@ -604,7 +899,6 @@
                         maxY = Math.max(maxY, pos.y);
                     });
                     skeletonHeight = maxY - minY;
-                    console.log('Skeleton height:', skeletonHeight, 'from Y range:', minY, 'to', maxY);
                 }
             }
         });
@@ -614,14 +908,10 @@
         let scale;
 
         if (hasSkinnedMesh && skeletonHeight > 0.1) {
-            // Use skeleton-based scale for animated models
             scale = TARGET_HEIGHT / skeletonHeight;
-            console.log('Using skeleton-based scale:', scale);
         } else {
-            // Use bounding box for static models
             const box = new THREE.Box3().setFromObject(model);
             const size = box.getSize(new THREE.Vector3());
-            console.log('Model bounding box size:', size);
             const maxDim = Math.max(size.x, size.y, size.z);
             scale = maxDim > 0 ? TARGET_HEIGHT / maxDim : 1;
         }
@@ -635,8 +925,6 @@
             console.warn('Extreme scale detected, flooring to 0.001:', scale);
             scale = 0.001;
         }
-
-        console.log('Final calculated scale:', scale);
 
         model.scale.setScalar(scale);
         model.updateMatrixWorld(true);
@@ -654,7 +942,6 @@
 
                 // Fix materials for GLB files from AI generators
                 if (child.material) {
-                    // Handle array of materials
                     const materials = Array.isArray(child.material) ? child.material : [child.material];
                     materials.forEach(mat => {
                         // Make double-sided to handle inverted normals
@@ -677,11 +964,8 @@
                             if (mat.emissiveMap) {
                                 mat.emissiveMap.encoding = THREE.sRGBEncoding;
                             }
-                            // Make sure material updates
                             mat.needsUpdate = true;
                         }
-
-                        console.log('Material adjusted:', mat.type, 'color:', mat.color, 'map:', mat.map);
                     });
                 }
             }
@@ -711,45 +995,59 @@
             }
         }
 
-        // Store in our objects map
         // Use saved rotation from Firebase, or default to facing forward (toward camera)
         const savedRotation = (figurine.rotationY !== undefined) ? figurine.rotationY : 0;
-        figurineObjects[id] = {
-            id,
-            model,
+        figurineObjects[id] = makeFigurineObject(id, model, {
             mixer,
             animations,
             hasAnimations,
-            currentAction: null,
             baseY: model.position.y,
             baseRotationY: savedRotation,
-            baseScale: scale,
-            // Per-figurine timing for independent movement schedules
-            nextWanderTime: Date.now() + Math.random() * 10000   // Stagger initial wander (0-10s)
-        };
+            baseScale: scale
+        });
 
         scene.add(model);
 
-        // Create HTML overlay for stats
-        createStatOverlay(id, figurine);
+        createTag(id, figurine);
 
         // Handle initial state
         if (figurine.state === 'sleeping') {
             startSleepParticles(id);
-        } else if (figurine.state === 'walking') {
-            // If loading a figurine that was walking but we don't have a target,
-            // reset to idle (prevents stuck walking state after page refresh)
-            if (!walkingTargets[id]) {
-                figurinesRef.child(id).update({ state: 'idle' });
-            }
+        } else if (figurine.state === 'walking' || figurine.state === 'emoting') {
+            // Legacy states the new system never writes - normalize
+            fbUpdate(id, { state: 'idle' });
+        } else if (figurine.state === 'eating' &&
+                   now() - (figurine.lastInteraction || 0) > 30000) {
+            // Stuck eating (tab closed mid-feed)
+            fbUpdate(id, { state: 'idle' });
         }
-
-        console.log(`Loaded figurine: ${figurine.name}`);
     }
 
     /**
-     * Create a placeholder for failed model loads
+     * Per-figurine client state shared by real models and placeholders.
      */
+    function makeFigurineObject(id, model, opts) {
+        return {
+            id,
+            model,
+            mixer: opts.mixer || null,
+            animations: opts.animations || {},
+            hasAnimations: !!opts.hasAnimations,
+            currentAction: null,
+            lastAnimState: null,
+            baseY: opts.baseY,
+            baseRotationY: opts.baseRotationY || 0,
+            baseScale: opts.baseScale ?? 1,
+            screenPos: null,
+            cachedStats: null,
+            tagEl: null,
+            refuseUntil: 0,
+            lowFlags: {},
+            // Per-figurine, per-client stroll schedule (staggered start)
+            nextStrollTime: now() + 10000 + Math.random() * (STROLL_MAX_DELAY - 10000)
+        };
+    }
+
     function createPlaceholder(id, figurine, worldX, worldZ) {
         const geometry = new THREE.BoxGeometry(1, 2, 0.5);
         const material = new THREE.MeshStandardMaterial({ color: 0x888888 });
@@ -758,232 +1056,12 @@
         mesh.position.set(worldX, 1, worldZ);
         mesh.castShadow = true;
 
-        figurineObjects[id] = {
-            id,
-            model: mesh,
-            mixer: null,
-            animations: {},
-            hasAnimations: false,
-            baseY: 1,
-            baseRotationY: 0,
-            baseScale: 1
-        };
+        figurineObjects[id] = makeFigurineObject(id, mesh, { baseY: 1 });
 
         scene.add(mesh);
-        createStatOverlay(id, figurine);
+        createTag(id, figurine);
     }
 
-    /**
-     * Create HTML overlay for stats
-     */
-    function createStatOverlay(id, figurine) {
-        const overlay = document.createElement('div');
-        overlay.className = 'figurine-overlay';
-        overlay.dataset.figurineOverlay = id;
-        overlay.innerHTML = `
-            <div class="figurine-header">
-                <div class="figurine-name">${Sanitize.escapeHtml(figurine.name || 'Figurine')}</div>
-                <button class="figurine-delete" data-delete-id="${Sanitize.escapeHtml(id)}" title="Delete figurine" aria-label="Delete figurine">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-            </div>
-            <div class="figurine-stats">
-                <div class="stat-bar">
-                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="#ff9800" stroke-width="2">
-                        <path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/>
-                    </svg>
-                    <div class="stat-track"><div class="stat-fill hunger" style="width: ${figurine.hunger || 80}%"></div></div>
-                </div>
-                <div class="stat-bar">
-                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="#e91e63" stroke-width="2">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-                    </svg>
-                    <div class="stat-track"><div class="stat-fill happiness" style="width: ${figurine.happiness || 80}%"></div></div>
-                </div>
-                <div class="stat-bar">
-                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="#4caf50" stroke-width="2">
-                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                    </svg>
-                    <div class="stat-track"><div class="stat-fill energy" style="width: ${figurine.energy || 80}%"></div></div>
-                </div>
-            </div>
-        `;
-
-        overlay.style.cssText = `
-            position: fixed;
-            transform: translate(-50%, -100%);
-            pointer-events: auto;
-            z-index: 60;
-            opacity: 0;
-            transition: opacity 0.2s;
-        `;
-
-        // Add delete handler (button is a UI hint — the database rule is the
-        // real gate; only admins can delete)
-        const deleteBtn = overlay.querySelector('.figurine-delete');
-        if (!isAdmin()) deleteBtn.style.display = 'none';
-        deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            deleteFigurine(id);
-        });
-
-        container.appendChild(overlay);
-    }
-
-    /**
-     * Delete a figurine
-     */
-    function deleteFigurine(id) {
-        if (!isAdmin()) return;
-        if (!confirm('Delete this figurine?')) return;
-
-        // Remove from Firebase; the child_removed listener handles scene
-        // cleanup, so a rejected delete leaves the figurine intact
-        figurinesRef.child(id).remove()
-            .catch((error) => {
-                console.error('Failed to delete figurine:', error);
-                alert('Failed to delete figurine: ' + error.message);
-            });
-    }
-
-    /**
-     * Update 3D figurine position and state
-     */
-    function updateFigurine3D(id, figurine, oldState) {
-        const obj = figurineObjects[id];
-        if (!obj || !obj.model) return;
-
-        // Update position
-        const worldX = ((figurine.x || 50) - 50) / 10;
-        const worldZ = ((figurine.z || 0) - 50) / 10;
-
-        // Smoothly move to new position
-        if (!isDragging || draggedFigurine !== id) {
-            const targetPos = new THREE.Vector3(worldX, obj.baseY, worldZ);
-            obj.model.position.lerp(targetPos, 0.1);
-        }
-
-        // Update rotation from Firebase when:
-        // 1. Walking (to face movement direction)
-        // 2. Transitioning from walking to idle (preserve final facing direction)
-        if (figurine.rotationY !== undefined) {
-            const wasWalking = oldState === 'walking';
-            const isWalking = figurine.state === 'walking';
-            const justStoppedWalking = wasWalking && !isWalking;
-
-            if (isWalking || justStoppedWalking) {
-                obj.baseRotationY = figurine.rotationY;
-            }
-        }
-
-        // Handle animation state changes
-        if (obj.hasAnimations && figurine.state !== oldState) {
-            switchAnimation(obj, figurine.state);
-        }
-
-        // Handle sleep particles
-        if (oldState !== 'sleeping' && figurine.state === 'sleeping') {
-            startSleepParticles(id);
-        } else if (oldState === 'sleeping' && figurine.state !== 'sleeping') {
-            stopSleepParticles(id);
-        }
-
-        // Update stat overlay
-        updateStatOverlay(id, figurine);
-    }
-
-    /**
-     * Switch animation for a figurine
-     */
-    function switchAnimation(obj, newState) {
-        if (!obj.mixer || !obj.hasAnimations) return;
-
-        // 'emoting' state is handled by playEmote() - don't interfere with it
-        // This prevents the animation from being reset/restarted by Firebase sync
-        if (newState === 'emoting') {
-            return;
-        }
-
-        // Map states to animation names
-        const animMap = {
-            'idle': ['idle', 'idle_loop', 'breathing_idle'],
-            'walking': ['walk', 'walking', 'walk_loop'],
-            'dancing': ['dance', 'dancing', 'dance_loop'],
-            'sleeping': ['sleep', 'sleeping', 'sit', 'sit_idle'],
-            'eating': ['eat', 'eating', 'chew']
-        };
-
-        const animNames = animMap[newState] || ['idle'];
-        let newAction = null;
-
-        // Find matching animation
-        for (const name of animNames) {
-            if (obj.animations[name]) {
-                newAction = obj.animations[name];
-                break;
-            }
-        }
-
-        // Fallback to first SYSTEM animation only (not custom emotes)
-        // This prevents accidentally triggering emote animations
-        if (!newAction) {
-            for (const name of SYSTEM_ANIMATIONS) {
-                if (obj.animations[name]) {
-                    newAction = obj.animations[name];
-                    break;
-                }
-            }
-        }
-
-        // If no animation found, stop current animation (important when leaving emote state)
-        if (!newAction) {
-            if (obj.currentAction) {
-                obj.currentAction.fadeOut(0.3);
-                obj.currentAction = null;
-            }
-            return;
-        }
-
-        if (newAction !== obj.currentAction) {
-            if (obj.currentAction) {
-                obj.currentAction.fadeOut(0.3);
-            }
-            newAction.reset().fadeIn(0.3).play();
-            obj.currentAction = newAction;
-        }
-    }
-
-    /**
-     * Update stat overlay values
-     */
-    function updateStatOverlay(id, figurine) {
-        const overlay = document.querySelector(`[data-figurine-overlay="${id}"]`);
-        if (!overlay) return;
-
-        const hungerFill = overlay.querySelector('.stat-fill.hunger');
-        const happinessFill = overlay.querySelector('.stat-fill.happiness');
-        const energyFill = overlay.querySelector('.stat-fill.energy');
-
-        if (hungerFill) {
-            hungerFill.style.width = `${figurine.hunger || 0}%`;
-            hungerFill.classList.toggle('low', (figurine.hunger || 0) < 20);
-        }
-        if (happinessFill) {
-            happinessFill.style.width = `${figurine.happiness || 0}%`;
-            happinessFill.classList.toggle('low', (figurine.happiness || 0) < 20);
-        }
-        if (energyFill) {
-            energyFill.style.width = `${figurine.energy || 0}%`;
-            energyFill.classList.toggle('low', (figurine.energy || 0) < 20);
-        }
-    }
-
-    /**
-     * Remove 3D figurine
-     */
     function removeFigurine3D(id) {
         const obj = figurineObjects[id];
         if (obj) {
@@ -1003,19 +1081,444 @@
                     }
                 });
             }
+            if (obj.tagEl) obj.tagEl.remove();
             delete figurineObjects[id];
         }
 
-        // Remove overlay
-        const overlay = document.querySelector(`[data-figurine-overlay="${id}"]`);
-        if (overlay) overlay.remove();
-
+        initiatedWalks.delete(id);
+        if (selectedId === id) closeCard();
         stopSleepParticles(id);
     }
 
+    function deleteFigurine(id) {
+        if (!isAdmin()) return;
+        if (!confirm('Delete this figurine?')) return;
+
+        // Remove from Firebase; the child_removed listener handles scene
+        // cleanup, so a rejected delete leaves the figurine intact
+        figurinesRef.child(id).remove()
+            .catch((error) => {
+                console.error('Failed to delete figurine:', error);
+                alert('Failed to delete figurine: ' + error.message);
+            });
+    }
+
+    // =========================================================================
+    // Animation clip switching
+    // =========================================================================
+
+    function switchAnimation(obj, newState) {
+        if (!obj.mixer || !obj.hasAnimations) return;
+
+        // Map states to animation names
+        const animMap = {
+            'idle': ['idle', 'idle_loop', 'breathing_idle'],
+            'walking': ['walk', 'walking', 'walk_loop'],
+            'dancing': ['dance', 'dancing', 'dance_loop'],
+            'sleeping': ['sleep', 'sleeping', 'sit', 'sit_idle'],
+            'eating': ['eat', 'eating', 'chew']
+        };
+
+        const animNames = animMap[newState] || ['idle'];
+        let newAction = null;
+
+        for (const name of animNames) {
+            if (obj.animations[name]) {
+                newAction = obj.animations[name];
+                break;
+            }
+        }
+
+        // Fallback to first SYSTEM animation only (not custom emotes)
+        if (!newAction) {
+            for (const name of SYSTEM_ANIMATIONS) {
+                if (obj.animations[name]) {
+                    newAction = obj.animations[name];
+                    break;
+                }
+            }
+        }
+
+        if (!newAction) {
+            if (obj.currentAction) {
+                obj.currentAction.fadeOut(0.3);
+                obj.currentAction = null;
+            }
+            return;
+        }
+
+        if (newAction !== obj.currentAction) {
+            if (obj.currentAction) {
+                obj.currentAction.fadeOut(0.3);
+            }
+            newAction.reset().fadeIn(0.3).play();
+            obj.currentAction = newAction;
+        }
+    }
+
+    // =========================================================================
+    // HUD: lightweight always-visible tags (name + stat slivers)
+    // =========================================================================
+
+    function createTag(id, figurine) {
+        const tag = document.createElement('div');
+        tag.className = 'figurine-tag';
+        tag.dataset.figurineTag = id;
+        tag.innerHTML = `
+            <div class="tag-name">${Sanitize.escapeHtml(figurine.name || 'Figurine')}</div>
+            <div class="tag-slivers">
+                <div class="sliver hunger"><i></i></div>
+                <div class="sliver happiness"><i></i></div>
+                <div class="sliver energy"><i></i></div>
+            </div>
+        `;
+        container.appendChild(tag);
+        const obj = figurineObjects[id];
+        if (obj) obj.tagEl = tag;
+        updateTagStats(id, figurine);
+    }
+
+    function updateTagStats(id, figurine) {
+        const obj = figurineObjects[id];
+        if (!obj || !obj.tagEl || !figurine) return;
+        const stats = effectiveStats(figurine);
+        obj.cachedStats = stats; // reused by the per-frame mood/posture checks
+
+        ['hunger', 'happiness', 'energy'].forEach((stat) => {
+            const sliver = obj.tagEl.querySelector(`.sliver.${stat}`);
+            sliver.firstElementChild.style.width = `${stats[stat]}%`;
+            sliver.classList.toggle('low', stats[stat] < LOW_THRESHOLDS[stat]);
+        });
+    }
+
+    function refreshAllTagStats() {
+        if (document.hidden) return;
+        Object.entries(figurines).forEach(([id, figurine]) => updateTagStats(id, figurine));
+        if (selectedId) renderCardStats();
+    }
+
     /**
-     * Get intersected figurine from mouse position
+     * Project every figurine's head position to the screen: positions the
+     * tags, the open card, and caches screenPos for proximity checks.
      */
+    function updateHudPositions() {
+        const vector = new THREE.Vector3();
+        Object.entries(figurineObjects).forEach(([id, obj]) => {
+            if (!obj.model) return;
+
+            // Feet sit at y=0 and models are ~2.6 tall, so the head is at a
+            // fixed world height regardless of the model's origin
+            vector.set(obj.model.position.x, 2.8, obj.model.position.z);
+            vector.project(camera);
+
+            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
+            obj.screenPos = { x, y };
+
+            if (obj.tagEl) {
+                obj.tagEl.style.left = `${x}px`;
+                obj.tagEl.style.top = `${y}px`;
+                obj.tagEl.classList.toggle('hidden', id === selectedId);
+            }
+
+            if (id === selectedId && card) {
+                card.style.left = `${x}px`;
+                card.style.top = `${y}px`;
+            }
+        });
+    }
+
+    // =========================================================================
+    // Figurine card - click to open, act, and sign up as caretaker
+    // =========================================================================
+
+    function ensureCard() {
+        if (card) return;
+        card = document.createElement('div');
+        card.className = 'figurine-card';
+        card.hidden = true;
+        card.innerHTML = `
+            <div class="card-header">
+                <span class="card-name"></span>
+                <span class="card-header-actions">
+                    <button class="card-delete" title="Delete figurine" aria-label="Delete figurine">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                    </button>
+                    <button class="card-close" title="Close" aria-label="Close">×</button>
+                </span>
+            </div>
+            <div class="card-stats">
+                <div class="card-stat" data-stat="hunger"><span class="stat-emoji">🍔</span><div class="stat-track"><div class="stat-fill hunger"></div></div><span class="stat-value"></span></div>
+                <div class="card-stat" data-stat="happiness"><span class="stat-emoji">❤️</span><div class="stat-track"><div class="stat-fill happiness"></div></div><span class="stat-value"></span></div>
+                <div class="card-stat" data-stat="energy"><span class="stat-emoji">⚡</span><div class="stat-track"><div class="stat-fill energy"></div></div><span class="stat-value"></span></div>
+            </div>
+            <div class="card-actions">
+                <button data-action="pet">🖐️ Pet</button>
+                <button data-action="feed">🍔 Feed</button>
+                <button data-action="dance">🕺 Dance</button>
+                <button data-action="sleep">😴 Sleep</button>
+            </div>
+            <div class="card-caretakers">
+                <div class="caretaker-count"></div>
+                <button class="become-caretaker">Become a caretaker 🤝</button>
+                <form class="caretaker-form" hidden>
+                    <input type="email" placeholder="you@email.com" maxlength="254" required>
+                    <button type="submit">Sign up</button>
+                </form>
+                <div class="caretaker-msg" hidden></div>
+            </div>
+        `;
+        container.appendChild(card);
+
+        card.querySelector('.card-close').addEventListener('click', closeCard);
+        card.querySelector('.card-delete').addEventListener('click', () => {
+            if (selectedId) deleteFigurine(selectedId);
+        });
+
+        card.querySelectorAll('.card-actions button').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (!selectedId) return;
+                handleAction(btn.dataset.action, selectedId);
+            });
+        });
+
+        const becomeBtn = card.querySelector('.become-caretaker');
+        const form = card.querySelector('.caretaker-form');
+        becomeBtn.addEventListener('click', () => {
+            becomeBtn.hidden = true;
+            form.hidden = false;
+            form.querySelector('input').focus();
+        });
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitCaretakerSignup();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeCard();
+        });
+    }
+
+    function openCard(id) {
+        const figurine = figurines[id];
+        const obj = figurineObjects[id];
+        if (!figurine || !obj) return;
+
+        ensureCard();
+
+        // A clicked figurine stops (clearing even a stale orphaned walk) and
+        // faces the camera
+        if (figurine.walk) {
+            finishWalkEarly(id);
+        }
+        obj.baseRotationY = 0;
+        if ((figurine.rotationY || 0) !== 0) {
+            fbUpdate(id, { rotationY: 0 });
+        }
+
+        selectedId = id;
+        resetCaretakerForm();
+        card.hidden = false;
+        renderCard();
+    }
+
+    function closeCard() {
+        selectedId = null;
+        if (card) card.hidden = true;
+    }
+
+    function renderCard() {
+        if (!selectedId || !card) return;
+        const figurine = figurines[selectedId];
+        if (!figurine) return;
+
+        card.querySelector('.card-name').textContent = figurine.name || 'Figurine';
+        card.querySelector('.card-delete').style.display = isAdmin() ? '' : 'none';
+        renderCardStats();
+        renderCardCaretakers();
+    }
+
+    function renderCardStats() {
+        if (!selectedId || !card || card.hidden) return;
+        const figurine = figurines[selectedId];
+        if (!figurine) return;
+        const stats = effectiveStats(figurine);
+
+        ['hunger', 'happiness', 'energy'].forEach((stat) => {
+            const row = card.querySelector(`.card-stat[data-stat="${stat}"]`);
+            row.querySelector('.stat-fill').style.width = `${stats[stat]}%`;
+            row.querySelector('.stat-value').textContent = Math.round(stats[stat]);
+        });
+
+        const state = figurine.state || 'idle';
+        card.querySelector('[data-action="dance"]').textContent =
+            state === 'dancing' ? '🧍 Stop' : '🕺 Dance';
+        card.querySelector('[data-action="sleep"]').textContent =
+            state === 'sleeping' ? '☀️ Wake' : '😴 Sleep';
+    }
+
+    function renderCardCaretakers() {
+        if (!selectedId || !card) return;
+        const count = caretakerCounts[selectedId] || 0;
+        const name = figurines[selectedId]?.name || 'this figurine';
+        const countEl = card.querySelector('.caretaker-count');
+        countEl.textContent = count === 0
+            ? `Nobody takes care of ${name} yet`
+            : count === 1
+                ? `1 person takes care of ${name}`
+                : `${count} people take care of ${name}`;
+    }
+
+    function resetCaretakerForm() {
+        if (!card) return;
+        card.querySelector('.become-caretaker').hidden = false;
+        const form = card.querySelector('.caretaker-form');
+        form.hidden = true;
+        form.querySelector('input').value = '';
+        form.querySelector('button').disabled = false;
+        const msg = card.querySelector('.caretaker-msg');
+        msg.hidden = true;
+        msg.textContent = '';
+    }
+
+    async function submitCaretakerSignup() {
+        const form = card.querySelector('.caretaker-form');
+        const input = form.querySelector('input');
+        const submitBtn = form.querySelector('button');
+        const msg = card.querySelector('.caretaker-msg');
+        const figurineId = selectedId;
+        const email = input.value.trim();
+        if (!figurineId || !email) return;
+
+        submitBtn.disabled = true;
+        msg.hidden = false;
+        msg.textContent = 'Signing up…';
+
+        try {
+            const response = await fetch(`${KEEPER_URL}/caretaker/signup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ figurineId, email })
+            });
+            const data = await response.json();
+            if (response.ok && data.ok) {
+                form.hidden = true;
+                msg.textContent = data.message || 'Check your email to confirm!';
+            } else {
+                msg.textContent = data.error || 'Something went wrong. Please try again.';
+                submitBtn.disabled = false;
+            }
+        } catch (error) {
+            console.error('Caretaker signup failed:', error);
+            msg.textContent = "Couldn't reach the signup service. Please try again.";
+            submitBtn.disabled = false;
+        }
+    }
+
+    // =========================================================================
+    // Actions - Pet / Feed / Dance / Sleep
+    // =========================================================================
+
+    function handleAction(action, id) {
+        const figurine = figurines[id];
+        const obj = figurineObjects[id];
+        if (!figurine || !obj) return;
+
+        switch (action) {
+            case 'pet': petFigurine(id, obj, figurine); break;
+            case 'feed': feedFigurine(id, obj, figurine); break;
+            case 'dance': toggleDance(id, figurine); break;
+            case 'sleep': toggleSleep(id, figurine); break;
+        }
+    }
+
+    /**
+     * Pet: +happiness with diminishing returns inside a rolling 60s window.
+     * Does NOT change state - except waking a sleeping figurine.
+     */
+    function petFigurine(id, obj, figurine) {
+        const t = now();
+        petHistory[id] = (petHistory[id] || []).filter((ts) => t - ts < PET_WINDOW_MS);
+        const delta = PET_DELTAS[Math.min(petHistory[id].length, PET_DELTAS.length - 1)];
+        petHistory[id].push(t);
+
+        const extra = figurine.state === 'sleeping' ? { state: 'idle' } : {};
+        writeStats(id, { happiness: delta }, extra);
+
+        // screenPos is set every frame; the card can only be open on a
+        // rendered figurine
+        const screenPos = obj.screenPos;
+        if (!screenPos) return;
+        for (let i = 0; i < 5; i++) {
+            setTimeout(() => {
+                spawnParticle(
+                    screenPos.x + (Math.random() - 0.5) * 60,
+                    screenPos.y + 20,
+                    'heart',
+                    HEARTS[Math.floor(Math.random() * HEARTS.length)]
+                );
+            }, i * 100);
+        }
+        spawnFeedback(screenPos.x, screenPos.y - 10, `+${delta} ❤️`);
+    }
+
+    /**
+     * Feed: +25 hunger, brief eating state. Full figurines refuse.
+     * Reads current data at write time (the old version captured a stale
+     * closure in its setTimeout, so rapid feeds didn't stack).
+     */
+    function feedFigurine(id, obj, figurine) {
+        const stats = effectiveStats(figurine);
+        const screenPos = obj.screenPos;
+
+        if (stats.hunger > FEED_REFUSE_ABOVE) {
+            obj.refuseUntil = now() + 900;
+            showThought(obj, 'not hungry!');
+            return;
+        }
+
+        if (screenPos) {
+            for (let i = 0; i < 3; i++) {
+                setTimeout(() => {
+                    spawnParticle(
+                        screenPos.x + (Math.random() - 0.5) * 40,
+                        screenPos.y + 30,
+                        'food',
+                        FOODS[Math.floor(Math.random() * FOODS.length)]
+                    );
+                }, i * 150);
+            }
+            spawnFeedback(screenPos.x, screenPos.y - 10, '+25 🍔');
+        }
+
+        const extra = figurine.state === 'idle' || figurine.state === 'eating' || !figurine.state
+            ? { state: 'eating' } : {};
+        writeStats(id, { hunger: 25 }, extra);
+
+        if (extra.state) {
+            setTimeout(() => {
+                if (figurines[id]?.state === 'eating') {
+                    fbUpdate(id, { state: 'idle' });
+                }
+            }, 1500);
+        }
+    }
+
+    function toggleDance(id, figurine) {
+        const newState = figurine.state === 'dancing' ? 'idle' : 'dancing';
+        // Materialize stats at the state change - decay rate depends on state
+        writeStats(id, {}, { state: newState, ...walkClearFields(id) });
+    }
+
+    function toggleSleep(id, figurine) {
+        const newState = figurine.state === 'sleeping' ? 'idle' : 'sleeping';
+        writeStats(id, {}, { state: newState, ...walkClearFields(id) });
+    }
+
+    // =========================================================================
+    // Pointer handling - click opens the card, drag moves
+    // =========================================================================
+
     function getIntersectedFigurine(event) {
         const rect = canvas.getBoundingClientRect();
         mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1043,9 +1546,6 @@
         return null;
     }
 
-    /**
-     * Get world position from mouse
-     */
     function getWorldPosition(event) {
         const rect = canvas.getBoundingClientRect();
         mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1060,9 +1560,6 @@
         return null;
     }
 
-    /**
-     * Handle mouse/touch interactions
-     */
     function onPointerDown(event) {
         event.preventDefault();
 
@@ -1071,49 +1568,38 @@
 
         const hit = getIntersectedFigurine({ clientX, clientY });
 
-        // Emote tool works anywhere - triggers random figurine with emotes
-        if (currentTool === 'emote') {
-            triggerRandomEmote();
-            return;
-        }
-
         if (hit) {
-            const { id, obj } = hit;
-            const figurine = figurines[id];
-
-            switch (currentTool) {
-                case 'move':
-                    isDragging = true;
-                    draggedFigurine = id;
-                    break;
-                case 'pet':
-                    petFigurine(id, obj, figurine);
-                    break;
-                case 'feed':
-                    feedFigurine(id, obj, figurine);
-                    break;
-                case 'dance':
-                    toggleDance(id, figurine);
-                    break;
-                case 'sleep':
-                    toggleSleep(id, figurine);
-                    break;
-            }
-        } else if (currentTool === 'call') {
-            const worldPos = getWorldPosition({ clientX, clientY });
-            if (worldPos) {
-                callFigurine(worldPos, clientX, clientY);
-            }
+            // Decide click vs drag on pointermove/up
+            pointerDown = { id: hit.id, x: clientX, y: clientY };
+        } else {
+            closeCard();
         }
     }
 
     function onPointerMove(event) {
+        const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+        const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+
+        pointerScreen.x = clientX;
+        pointerScreen.y = clientY;
+        checkProximityPause();
+
+        if (pointerDown && !isDragging) {
+            const moved = Math.hypot(clientX - pointerDown.x, clientY - pointerDown.y);
+            if (moved > 6) {
+                // Threshold crossed: this is a drag, not a click. Cancel any
+                // walk (stale ones included) so it can't fight the drag.
+                isDragging = true;
+                draggedFigurine = pointerDown.id;
+                if (figurines[draggedFigurine]?.walk) {
+                    finishWalkEarly(draggedFigurine);
+                }
+            }
+        }
+
         if (!isDragging || !draggedFigurine) return;
 
         event.preventDefault();
-
-        const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-        const clientY = event.touches ? event.touches[0].clientY : event.clientY;
 
         const worldPos = getWorldPosition({ clientX, clientY });
         if (worldPos) {
@@ -1133,204 +1619,28 @@
                 const x = obj.model.position.x * 10 + 50;
                 const z = obj.model.position.z * 10 + 50;
 
-                figurinesRef.child(draggedFigurine).update({
-                    x: Math.max(0, Math.min(100, x)),
-                    z: Math.max(0, Math.min(100, z)),
-                    lastInteraction: Date.now()
+                // walk: null guards against a stroll another client initiated
+                // mid-drag - the drop position wins
+                fbUpdate(draggedFigurine, {
+                    x: round2(Math.max(0, Math.min(100, x))),
+                    z: round2(Math.max(0, Math.min(100, z))),
+                    walk: null,
+                    lastInteraction: now()
                 });
             }
+        } else if (pointerDown) {
+            openCard(pointerDown.id);
         }
 
+        pointerDown = null;
         isDragging = false;
         draggedFigurine = null;
     }
 
-    /**
-     * Pet a figurine
-     */
-    function petFigurine(id, obj, figurine) {
-        // Spawn heart particles at model position
-        const screenPos = getScreenPosition(obj.model);
+    // =========================================================================
+    // Particles & feedback
+    // =========================================================================
 
-        for (let i = 0; i < 5; i++) {
-            setTimeout(() => {
-                spawnParticle(
-                    screenPos.x + (Math.random() - 0.5) * 60,
-                    screenPos.y - 30,
-                    'heart',
-                    HEARTS[Math.floor(Math.random() * HEARTS.length)]
-                );
-            }, i * 100);
-        }
-
-        // Update happiness
-        const newHappiness = Math.min(100, (figurine.happiness || 0) + 15);
-        figurinesRef.child(id).update({
-            happiness: newHappiness,
-            lastInteraction: Date.now(),
-            state: 'idle'
-        });
-    }
-
-    /**
-     * Feed a figurine
-     */
-    function feedFigurine(id, obj, figurine) {
-        const screenPos = getScreenPosition(obj.model);
-
-        for (let i = 0; i < 3; i++) {
-            setTimeout(() => {
-                spawnParticle(
-                    screenPos.x + (Math.random() - 0.5) * 40,
-                    screenPos.y - 60,
-                    'food',
-                    FOODS[Math.floor(Math.random() * FOODS.length)]
-                );
-            }, i * 150);
-        }
-
-        figurinesRef.child(id).update({
-            state: 'eating',
-            lastInteraction: Date.now()
-        });
-
-        setTimeout(() => {
-            const newHunger = Math.min(100, (figurine.hunger || 0) + 25);
-            figurinesRef.child(id).update({
-                hunger: newHunger,
-                state: 'idle'
-            });
-        }, 1500);
-    }
-
-    /**
-     * Toggle dance state
-     */
-    function toggleDance(id, figurine) {
-        const newState = figurine.state === 'dancing' ? 'idle' : 'dancing';
-        figurinesRef.child(id).update({
-            state: newState,
-            lastInteraction: Date.now()
-        });
-    }
-
-    /**
-     * Toggle sleep state
-     */
-    function toggleSleep(id, figurine) {
-        const newState = figurine.state === 'sleeping' ? 'idle' : 'sleeping';
-        figurinesRef.child(id).update({
-            state: newState,
-            lastInteraction: Date.now()
-        });
-    }
-
-    /**
-     * Get available custom emote animations (excludes system animations)
-     */
-    function getAvailableEmotes(obj) {
-        if (!obj.animations) return [];
-        return Object.keys(obj.animations).filter(name =>
-            !SYSTEM_ANIMATIONS.includes(name)
-        );
-    }
-
-    /**
-     * Play a random emote animation
-     */
-    function playEmote(id, obj, figurine) {
-        const emotes = getAvailableEmotes(obj);
-        if (emotes.length === 0) return; // No custom emotes available
-
-        // Prevent double-triggering if already emoting
-        if (figurine.state === 'emoting' || obj.isEmoting) return;
-        obj.isEmoting = true;
-
-        const randomEmote = emotes[Math.floor(Math.random() * emotes.length)];
-        const action = obj.animations[randomEmote];
-
-        // Play once, then return to idle
-        action.setLoop(THREE.LoopOnce);
-        action.clampWhenFinished = true;
-
-        if (obj.currentAction) {
-            obj.currentAction.fadeOut(0.3);
-        }
-        action.reset().fadeIn(0.3).play();
-        obj.currentAction = action;
-
-        // Update Firebase state
-        figurinesRef.child(id).update({
-            state: 'emoting',
-            lastInteraction: Date.now()
-        });
-
-        // Return to idle when animation completes
-        // Use minimum 2 seconds if duration is too short or invalid
-        const clipDuration = action.getClip().duration * 1000;
-        const duration = Math.max(2000, clipDuration || 2000);
-        console.log(`Playing emote "${randomEmote}" for ${duration}ms (clip: ${clipDuration}ms)`);
-
-        setTimeout(() => {
-            // Only update if still emoting (prevent race conditions)
-            if (obj.isEmoting) {
-                figurinesRef.child(id).update({ state: 'idle' });
-                obj.isEmoting = false;
-            }
-        }, duration + 300); // +300ms for fade
-    }
-
-    /**
-     * Call figurine to a location
-     */
-    function callFigurine(worldPos, screenX, screenY) {
-        const ids = Object.keys(figurines);
-        if (ids.length === 0) return;
-
-        const id = ids[Math.floor(Math.random() * ids.length)];
-        const figurine = figurines[id];
-        const obj = figurineObjects[id];
-
-        if (!obj || !obj.model) return;
-
-        // Convert to Firebase coords
-        const x = Math.max(15, Math.min(85, worldPos.x * 10 + 50));
-        const z = Math.max(15, Math.min(85, worldPos.z * 10 + 50));
-
-        // Set the walking target for smooth movement
-        walkingTargets[id] = {
-            x: x,
-            z: z,
-            startTime: Date.now()
-        };
-
-        // Update state to walking
-        figurinesRef.child(id).update({
-            state: 'walking',
-            lastInteraction: Date.now()
-        });
-
-        // Show ripple
-        showCallRipple(screenX, screenY);
-    }
-
-    /**
-     * Get screen position from 3D object
-     */
-    function getScreenPosition(object) {
-        const vector = new THREE.Vector3();
-        object.getWorldPosition(vector);
-        vector.project(camera);
-
-        return {
-            x: (vector.x * 0.5 + 0.5) * window.innerWidth,
-            y: (-(vector.y * 0.5) + 0.5) * window.innerHeight
-        };
-    }
-
-    /**
-     * Spawn a particle effect
-     */
     function spawnParticle(x, y, type, content) {
         const particle = document.createElement('div');
         particle.className = `particle ${type}`;
@@ -1343,31 +1653,29 @@
     }
 
     /**
-     * Show call ripple effect
+     * Floating action feedback, e.g. "+15 ❤️"
      */
-    function showCallRipple(x, y) {
-        const ripple = document.createElement('div');
-        ripple.className = 'call-ripple';
-        ripple.style.left = `${x}px`;
-        ripple.style.top = `${y}px`;
-        document.body.appendChild(ripple);
-        setTimeout(() => ripple.remove(), 600);
+    function spawnFeedback(x, y, text) {
+        const el = document.createElement('div');
+        el.className = 'feedback-float';
+        el.textContent = text;
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        particlesContainer.appendChild(el);
+        setTimeout(() => el.remove(), 1200);
     }
 
-    /**
-     * Sleep particles
-     */
     function startSleepParticles(id) {
         if (sleepParticleIntervals[id]) return;
 
         sleepParticleIntervals[id] = setInterval(() => {
+            if (document.hidden) return;
             const obj = figurineObjects[id];
-            if (!obj || !obj.model) return;
+            if (!obj || !obj.model || !obj.screenPos) return;
 
-            const screenPos = getScreenPosition(obj.model);
             spawnParticle(
-                screenPos.x + 30,
-                screenPos.y - 40,
+                obj.screenPos.x + 30,
+                obj.screenPos.y + 20,
                 'zzz',
                 ZZZ[Math.floor(Math.random() * ZZZ.length)]
             );
@@ -1381,177 +1689,10 @@
         }
     }
 
-    /**
-     * Decay stats over time
-     */
-    function decayStats() {
-        const now = Date.now();
+    // =========================================================================
+    // Upload modal (unchanged behavior)
+    // =========================================================================
 
-        Object.entries(figurines).forEach(([id, figurine]) => {
-            const updates = {};
-            let hasUpdates = false;
-
-            if (now - (figurine.lastInteraction || 0) > STAT_DECAY_INTERVAL) {
-                if ((figurine.hunger || 0) > 0) {
-                    updates.hunger = Math.max(0, (figurine.hunger || 0) - HUNGER_DECAY_RATE);
-                    hasUpdates = true;
-                }
-                if ((figurine.happiness || 0) > 0) {
-                    updates.happiness = Math.max(0, (figurine.happiness || 0) - HAPPINESS_DECAY_RATE);
-                    hasUpdates = true;
-                }
-
-                if (figurine.state === 'sleeping') {
-                    if ((figurine.energy || 0) < 100) {
-                        updates.energy = Math.min(100, (figurine.energy || 0) + ENERGY_RECOVERY_RATE);
-                        hasUpdates = true;
-                    }
-                } else if (figurine.state === 'dancing') {
-                    if ((figurine.energy || 0) > 0) {
-                        updates.energy = Math.max(0, (figurine.energy || 0) - (ENERGY_DECAY_RATE * 2));
-                        hasUpdates = true;
-                    }
-                } else {
-                    if ((figurine.energy || 0) > 0) {
-                        updates.energy = Math.max(0, (figurine.energy || 0) - ENERGY_DECAY_RATE);
-                        hasUpdates = true;
-                    }
-                }
-
-                if (hasUpdates) {
-                    figurinesRef.child(id).update(updates);
-                }
-            }
-        });
-    }
-
-    /**
-     * Check if a destination would be too close to other figurines
-     */
-    function isDestinationClear(id, destX, destZ) {
-        const worldX = (destX - 50) / 10;
-        const worldZ = (destZ - 50) / 10;
-
-        for (const [otherId, otherObj] of Object.entries(figurineObjects)) {
-            if (otherId === id || !otherObj.model) continue;
-
-            const dx = worldX - otherObj.model.position.x;
-            const dz = worldZ - otherObj.model.position.z;
-            const distance = Math.sqrt(dx * dx + dz * dz);
-
-            // Keep more distance for destination planning
-            if (distance < COLLISION_RADIUS * 2) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Idle wandering - makes figurines naturally explore (Mii-like behavior)
-     * Each figurine has its own schedule to prevent synchronized movement
-     */
-    function idleWander() {
-        const now = Date.now();
-        Object.entries(figurines).forEach(([id, figurine]) => {
-            const obj = figurineObjects[id];
-            if (!obj || !obj.model) return;
-
-            // Check if it's time for this figurine to consider wandering
-            if (now < obj.nextWanderTime) return;
-
-            // Skip if already walking, dancing, sleeping, emoting, or has a target
-            if (figurine.state !== 'idle' || walkingTargets[id]) {
-                // Still update next wander time so we check again later
-                obj.nextWanderTime = now + 2000 + Math.random() * 3000;
-                return;
-            }
-
-            // Short delay after interaction before wandering again
-            const timeSinceInteraction = now - (figurine.lastInteraction || 0);
-            if (timeSinceInteraction < 2000) {
-                obj.nextWanderTime = now + 2000;
-                return;
-            }
-
-            // Calculate a random nearby destination
-            const currentX = figurine.x || 50;
-            const currentZ = figurine.z || 50;
-
-            // Mii-like: Variable movement distances (sometimes short strolls, sometimes longer walks)
-            const isShortWalk = Math.random() < 0.6;
-            const maxDist = isShortWalk ? MIN_WANDER_DISTANCE + 5 : MAX_WANDER_DISTANCE;
-            const minDist = isShortWalk ? MIN_WANDER_DISTANCE : MIN_WANDER_DISTANCE + 5;
-
-            // Try to find a clear destination (up to 5 attempts)
-            let newX, newZ;
-            let foundClear = false;
-
-            for (let attempt = 0; attempt < 5; attempt++) {
-                // Random angle for more natural movement patterns
-                const angle = Math.random() * Math.PI * 2;
-                const distance = minDist + Math.random() * (maxDist - minDist);
-
-                newX = Math.max(15, Math.min(85, currentX + Math.cos(angle) * distance));
-                newZ = Math.max(15, Math.min(85, currentZ + Math.sin(angle) * distance));
-
-                if (isDestinationClear(id, newX, newZ)) {
-                    foundClear = true;
-                    break;
-                }
-            }
-
-            // If no clear destination found, skip and try again later
-            if (!foundClear) {
-                obj.nextWanderTime = now + 3000 + Math.random() * 5000;
-                return;
-            }
-
-            // Set the walking target for smooth movement
-            walkingTargets[id] = {
-                x: newX,
-                z: newZ,
-                startTime: now
-            };
-
-            // Update state to walking (position will update smoothly via animation loop)
-            figurinesRef.child(id).update({
-                state: 'walking'
-            });
-
-            // Set next wander time (5-15 seconds after this walk completes)
-            obj.nextWanderTime = now + 5000 + Math.random() * 10000;
-        });
-    }
-
-    /**
-     * Trigger a random emote on a random figurine that has emotes available
-     */
-    function triggerRandomEmote() {
-        // Find all figurines that have custom emotes and are idle
-        const candidates = [];
-        Object.entries(figurines).forEach(([id, figurine]) => {
-            const obj = figurineObjects[id];
-            if (!obj || !obj.hasAnimations) return;
-            if (obj.isEmoting) return;
-            if (figurine.state !== 'idle') return;
-
-            const emotes = getAvailableEmotes(obj);
-            if (emotes.length > 0) {
-                candidates.push({ id, obj, figurine });
-            }
-        });
-
-        if (candidates.length === 0) return;
-
-        // Pick a random candidate
-        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-        playEmote(chosen.id, chosen.obj, chosen.figurine);
-    }
-
-    /**
-     * Setup upload modal
-     */
     function setupUploadModal() {
         const dropzone = document.getElementById('upload-dropzone');
         const fileInput = document.getElementById('model-file');
@@ -1768,8 +1909,6 @@
             submitBtn.textContent = 'Uploading...';
 
             try {
-                console.log('Starting upload to Firebase Storage...');
-
                 // Upload to Firebase Storage
                 const filename = `figurines/${Date.now()}_${selectedFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
                 const storageRef = storage.ref(filename);
@@ -1782,7 +1921,6 @@
                         (snapshot) => {
                             const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
                             submitBtn.textContent = `Uploading ${Math.round(progress)}%`;
-                            console.log(`Upload progress: ${progress}%`);
                         },
                         (error) => {
                             console.error('Upload error:', error);
@@ -1794,9 +1932,7 @@
                     );
                 });
 
-                console.log('Upload complete, getting download URL...');
                 const downloadUrl = await storageRef.getDownloadURL();
-                console.log('Download URL:', downloadUrl);
 
                 // Create figurine entry
                 const newFigurine = {
@@ -1809,11 +1945,11 @@
                     hunger: 80,
                     happiness: 80,
                     energy: 80,
-                    lastInteraction: Date.now()
+                    statsUpdatedAt: now(),
+                    lastInteraction: now()
                 };
 
                 await figurinesRef.push(newFigurine);
-                console.log('Figurine added successfully');
 
                 closeModal();
             } catch (error) {
@@ -1835,41 +1971,10 @@
         });
     }
 
-    /**
-     * Setup toolbar
-     */
-    function setupToolbar() {
-        toolbar?.querySelectorAll('.tool-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tool = btn.dataset.tool;
-                if (!tool) return;
+    // =========================================================================
+    // Init
+    // =========================================================================
 
-                toolbar.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-
-                currentTool = tool;
-                document.body.classList.toggle('call-mode', tool === 'call');
-            });
-        });
-    }
-
-    /**
-     * Setup stats toggle
-     */
-    function setupStatsToggle() {
-        toggleStatsBtn?.addEventListener('click', () => {
-            showStats = !showStats;
-            toggleStatsBtn.classList.toggle('active', showStats);
-
-            document.querySelectorAll('.figurine-overlay').forEach(overlay => {
-                overlay.style.opacity = showStats ? '1' : '0';
-            });
-        });
-    }
-
-    /**
-     * Setup global events
-     */
     function setupGlobalEvents() {
         canvas.addEventListener('mousedown', onPointerDown);
         canvas.addEventListener('touchstart', onPointerDown, { passive: false });
@@ -1881,19 +1986,15 @@
         document.addEventListener('touchend', onPointerUp);
     }
 
-    /**
-     * Initialize
-     */
     function init() {
         initThreeJS();
-        setupToolbar();
-        setupStatsToggle();
         setupGlobalEvents();
         setupUploadModal();
         initFirebase();
 
-        statDecayInterval = setInterval(decayStats, STAT_DECAY_INTERVAL);
-        idleWanderInterval = setInterval(idleWander, IDLE_WANDER_INTERVAL);
+        setInterval(considerStrolls, 1000);
+        setInterval(refreshAllTagStats, 500);
+        setInterval(runMoodBehaviors, 5000);
     }
 
     // Start when DOM is ready

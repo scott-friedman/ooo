@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "Marks the workers as ES modules so node can import their exported pure functions in tests/ (wrangler ignores this)."
+}

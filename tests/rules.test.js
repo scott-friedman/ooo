@@ -101,6 +101,62 @@ test('only admin can delete a figurine', async () => {
     await assertSucceeds(remove(ref(adminDb(), 'figurines/fig3')));
 });
 
+test('anon can write a valid walk and statsUpdatedAt', async () => {
+    await set(ref(anonDb(), 'figurines/fig-walk'), validFigurine());
+    await assertSucceeds(update(ref(anonDb(), 'figurines/fig-walk'), {
+        walk: { fromX: 50, fromZ: 50, toX: 60, toZ: 40, startedAt: Date.now(), duration: 8000 },
+        statsUpdatedAt: Date.now(),
+    }));
+    // Clearing the walk (stroll finished) is allowed
+    await assertSucceeds(update(ref(anonDb(), 'figurines/fig-walk'), { walk: null }));
+});
+
+test('walk coords are clamped 0-100 and duration capped at 60s', async () => {
+    await set(ref(anonDb(), 'figurines/fig-walk2'), validFigurine());
+    await assertFails(update(ref(anonDb(), 'figurines/fig-walk2'), {
+        walk: { fromX: 50, fromZ: 50, toX: 150, toZ: 40, startedAt: Date.now(), duration: 8000 },
+    }));
+    await assertFails(update(ref(anonDb(), 'figurines/fig-walk2'), {
+        walk: { fromX: 50, fromZ: 50, toX: 60, toZ: 40, startedAt: Date.now(), duration: 120000 },
+    }));
+    // Partial walk objects are rejected
+    await assertFails(update(ref(anonDb(), 'figurines/fig-walk2'), {
+        walk: { toX: 60, toZ: 40 },
+    }));
+});
+
+test('figurines reject unknown fields and non-number statsUpdatedAt', async () => {
+    await set(ref(anonDb(), 'figurines/fig-strict'), validFigurine());
+    await assertFails(update(ref(anonDb(), 'figurines/fig-strict'), { payload: 'arbitrary' }));
+    await assertFails(update(ref(anonDb(), 'figurines/fig-strict'), { statsUpdatedAt: 'yesterday' }));
+});
+
+// ---------- caretakers / caretakerCounts / notifyState ----------
+
+test('caretaker emails are unreadable and unwritable by anon', async () => {
+    await assertFails(get(ref(anonDb(), 'caretakers')));
+    await assertFails(get(ref(anonDb(), 'caretakers/fig1')));
+    await assertFails(set(ref(anonDb(), 'caretakers/fig1/x'), {
+        email: 'spammer@example.com', createdAt: Date.now(),
+    }));
+});
+
+test('caretaker emails are unreadable even by admin (worker-secret only)', async () => {
+    await assertFails(get(ref(adminDb(), 'caretakers')));
+    await assertFails(set(ref(adminDb(), 'caretakers/fig1/x'), { email: 'a@b.c' }));
+});
+
+test('caretakerCounts are public read, nobody writes via client', async () => {
+    await assertSucceeds(get(ref(anonDb(), 'caretakerCounts')));
+    await assertFails(set(ref(anonDb(), 'caretakerCounts/fig1'), 999));
+    await assertFails(set(ref(adminDb(), 'caretakerCounts/fig1'), 999));
+});
+
+test('notifyState is fully private', async () => {
+    await assertFails(get(ref(anonDb(), 'notifyState')));
+    await assertFails(set(ref(anonDb(), 'notifyState/fig1/hungry'), { lastNotifiedAt: 0 }));
+});
+
 // ---------- commandcenter/log ----------
 
 test('anyone can read the activity log', async () => {

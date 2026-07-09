@@ -1,0 +1,21 @@
+# Cloudflare Worker configuration for the Figurines Keeper
+# Deploy with: npx wrangler deploy --config wrangler-figurines.toml
+#
+# After deploying, set secrets via:
+# npx wrangler secret put FIREBASE_SECRET --config wrangler-figurines.toml   (RTDB database secret — decay + caretaker storage)
+# npx wrangler secret put RESEND_API_KEY --config wrangler-figurines.toml    (requires Resend domain verification of scottfriedman.ooo)
+#
+# Test the cron locally: npx wrangler dev --config wrangler-figurines.toml --test-scheduled
+# then: curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"
+
+name = "figurines-keeper"
+main = "figurines-keeper.js"
+compatibility_date = "2026-07-01"
+
+[triggers]
+crons = ["*/30 * * * *"]
+
+[vars]
+FIREBASE_URL = "https://scottfriedman-f400d-default-rtdb.firebaseio.com"
+# Used for confirm/unsubscribe links inside emails sent from the cron
+WORKER_URL = "https://figurines-keeper.s-friedman.workers.dev"
