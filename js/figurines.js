@@ -367,6 +367,11 @@
                 updateProceduralAnimation(id, obj, figurine, animState, t);
             }
 
+            if (obj.hitProxy) {
+                obj.hitProxy.position.x = obj.model.position.x;
+                obj.hitProxy.position.z = obj.model.position.z;
+            }
+
             // Feed-refusal head shake works for both animated and procedural models
             if (obj.refuseUntil && obj.refuseUntil > t) {
                 obj.model.rotation.y = obj.baseRotationY + Math.sin(t * 0.045) * 0.3;
@@ -1024,10 +1029,27 @@
     }
 
     /**
+     * Invisible cylinder used for click detection. Raycasting the models
+     * directly fails on r128: skinned meshes are tested against their
+     * undeformed bind-pose geometry (tiny for Meshy exports), so clicks
+     * never land. The proxy tracks the model's position each frame.
+     */
+    function makeHitProxy() {
+        const proxy = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.5, 0.5, 2.8, 8),
+            new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+        );
+        proxy.position.y = 1.4;
+        scene.add(proxy);
+        return proxy;
+    }
+
+    /**
      * Per-figurine client state shared by real models and placeholders.
      */
     function makeFigurineObject(id, model, opts) {
         return {
+            hitProxy: makeHitProxy(),
             id,
             model,
             mixer: opts.mixer || null,
@@ -1080,6 +1102,11 @@
                         }
                     }
                 });
+            }
+            if (obj.hitProxy) {
+                scene.remove(obj.hitProxy);
+                obj.hitProxy.geometry.dispose();
+                obj.hitProxy.material.dispose();
             }
             if (obj.tagEl) obj.tagEl.remove();
             delete figurineObjects[id];
@@ -1526,18 +1553,13 @@
 
         raycaster.setFromCamera(mouse, camera);
 
-        const models = Object.values(figurineObjects).map(obj => obj.model).filter(m => m);
-        const intersects = raycaster.intersectObjects(models, true);
+        // Raycast the hit proxies, not the models (see makeHitProxy)
+        const proxies = Object.values(figurineObjects).map(obj => obj.hitProxy).filter(p => p);
+        const intersects = raycaster.intersectObjects(proxies, false);
 
         if (intersects.length > 0) {
-            // Find which figurine was hit
-            let hitObject = intersects[0].object;
-            while (hitObject.parent && !Object.values(figurineObjects).some(obj => obj.model === hitObject)) {
-                hitObject = hitObject.parent;
-            }
-
             for (const [id, obj] of Object.entries(figurineObjects)) {
-                if (obj.model === hitObject) {
+                if (obj.hitProxy === intersects[0].object) {
                     return { id, obj, point: intersects[0].point };
                 }
             }
