@@ -273,6 +273,12 @@
     gap: 5px;
 }
 
+/* display: flex above would defeat the hidden attribute (author styles beat
+   the UA's [hidden] rule), so restate it */
+.figurine-card [hidden] {
+    display: none;
+}
+
 .caretaker-form input {
     flex: 1;
     min-width: 0;

@@ -1250,7 +1250,9 @@
 
             if (id === selectedId && card) {
                 card.style.left = `${x}px`;
-                card.style.top = `${y}px`;
+                // Keep the whole card on screen for figurines near the top
+                // (it renders translated -100% above this anchor)
+                card.style.top = `${Math.max(y, card.offsetHeight + 16)}px`;
             }
         });
     }
