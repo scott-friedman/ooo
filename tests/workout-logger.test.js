@@ -16,7 +16,7 @@ const path = require('node:path');
 
 const {
     parseRepScheme, buildSession, completeSet, uncompleteSet, editSet,
-    addSet, removeSet, swapToAlt, skipExercise, setExerciseNotes,
+    addSet, removeSet, swapToAlt, swapBack, skipExercise, setExerciseNotes,
     setExerciseRpe, finishSession,
 } = require('../js/workout-logger.js');
 const { parseDescription } = require('../js/workouts.js');
@@ -154,6 +154,31 @@ test('editSet is reversible and leaves target untouched', () => {
     assert.strictEqual(edited.exercises[0].sets[0].target.reps, 5); // target unchanged
     const back = editSet(edited, 0, 0, { reps: 5 });
     assert.deepStrictEqual(back, base);
+});
+
+test('swapToAlt / swapBack round-trip restores name and set records', () => {
+    const day = {
+        summary: 'A2 BENCH DAY',
+        warmup: null,
+        exercises: [{ tier: 'T3', name: 'Lat Pulldown', weight: '70 lbs', tag: null, reps: '3×12' }],
+        alts: [{ for: 'Lat Pulldown', name: 'DB Row', weight: '40 lb DBs', reps: '3×12' }],
+        bw: null,
+    };
+    const base = buildSession(day, { mode: 'gym', startedAt: '2026-07-09T09:00' });
+    // One set already completed before the swap.
+    const oneDone = completeSet(base, 0, 0);
+    // The UI snapshots {plan_name, sets} at swap time.
+    const snapshot = JSON.parse(JSON.stringify({
+        plan_name: oneDone.exercises[0].plan_name,
+        sets: oneDone.exercises[0].sets,
+    }));
+    const swapped = swapToAlt(oneDone, 0, day.alts[0]);
+    assert.strictEqual(swapped.exercises[0].plan_name, 'DB Row');
+    assert.strictEqual(swapped.exercises[0].swapped_from, 'Lat Pulldown');
+    assert.strictEqual(swapped.exercises[0].sets[0].done, false); // rebuilt from alt scheme
+
+    const back = swapBack(swapped, 0, snapshot);
+    assert.deepStrictEqual(back, oneDone); // completed set survives the round-trip
 });
 
 test('completeSet / uncompleteSet round-trip', () => {

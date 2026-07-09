@@ -263,6 +263,20 @@ function swapToAlt(session, exIdx, alt) {
     return s;
 }
 
+/**
+ * Undo swapToAlt. `original` is the pre-swap snapshot the UI captured:
+ * { plan_name, sets }. Restores the name and the exact set records (including
+ * any already-completed sets); notes/rpe stay, mirroring swapToAlt.
+ */
+function swapBack(session, exIdx, original) {
+    const s = clone(session);
+    const ex = s.exercises[exIdx];
+    ex.plan_name = original.plan_name;
+    ex.swapped_from = null;
+    ex.sets = JSON.parse(JSON.stringify(original.sets));
+    return s;
+}
+
 /** Mark every set of an exercise not-done (a skipped exercise renders to nothing). */
 function skipExercise(session, exIdx) {
     const s = clone(session);
@@ -303,7 +317,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         parseRepScheme, parseWeight, buildWorkSets, buildSession,
         completeSet, uncompleteSet, editSet, addSet, removeSet,
-        swapToAlt, skipExercise, setExerciseNotes, setExerciseRpe,
+        swapToAlt, swapBack, skipExercise, setExerciseNotes, setExerciseRpe,
         finishSession, DAY_LABELS,
     };
 }
@@ -341,6 +355,7 @@ if (typeof document !== 'undefined') (function () {
     let syncBar = null;         // .logger-sync
     let timerId = null;
     let view = 'live';          // 'live' | 'review'
+    let renderedView = null;    // view the overlay DOM currently shows (scroll-keep guard)
     const openWarm = new Set(); // exIdx whose warmup expander is open (survives re-render)
     const openMenu = new Set(); // exIdx whose ⋯ panel is open (survives re-render)
 
@@ -405,6 +420,7 @@ if (typeof document !== 'undefined') (function () {
             loggerDay = d ? JSON.parse(d) : null;
         } catch (e) { activeSession = null; loggerDay = null; }
         if (loggerDay && !Array.isArray(loggerDay.skipped)) loggerDay.skipped = [];
+        if (loggerDay && (!loggerDay.swapUndo || typeof loggerDay.swapUndo !== 'object')) loggerDay.swapUndo = {};
     }
 
     function clearActive() {
@@ -533,9 +549,11 @@ if (typeof document !== 'undefined') (function () {
             hasSauna: !!day.sauna,
             saunaDefault: extractSaunaMinutes(day.sauna),
             skipped: [],
+            swapUndo: {},
         };
         openWarm.clear();
         openMenu.clear();
+        renderedView = null; // fresh session always opens at the top
         persist();
         openOverlay();
     }
@@ -737,13 +755,29 @@ if (typeof document !== 'undefined') (function () {
             const last = activeSession.exercises[exIdx].sets.length - 1;
             if (last >= 0) { activeSession = removeSet(activeSession, exIdx, last); persist(); renderView(); }
         });
-        const swap = el('button', 'lex-act', '⇄ swap to alt'); swap.type = 'button'; swap.dataset.act = 'swap';
+        // Swapped exercises offer the inverse ("swap back") from the snapshot
+        // captured at swap time — a mis-tapped swap was otherwise permanent.
+        const swapped = !!ex.swapped_from;
+        const undoSnap = swapped && loggerDay && loggerDay.swapUndo
+            ? loggerDay.swapUndo[String(exIdx)] : null;
         const alt = (loggerDay && loggerDay.alts || []).find((a) => a.for === ex.plan_name);
-        swap.disabled = !alt;
-        if (alt) swap.title = 'Swap to ' + alt.name;
+        const swap = el('button', 'lex-act', swapped ? '⇄ swap back' : '⇄ swap to alt');
+        swap.type = 'button'; swap.dataset.act = 'swap';
+        swap.disabled = swapped ? !undoSnap : !alt;
+        if (swapped && undoSnap) swap.title = 'Back to ' + undoSnap.plan_name;
+        else if (alt) swap.title = 'Swap to ' + alt.name;
         swap.addEventListener('click', () => {
-            if (!alt) return;
-            activeSession = swapToAlt(activeSession, exIdx, alt);
+            if (swapped) {
+                if (!undoSnap) return;
+                activeSession = swapBack(activeSession, exIdx, undoSnap);
+                delete loggerDay.swapUndo[String(exIdx)];
+            } else {
+                if (!alt) return;
+                if (!loggerDay.swapUndo) loggerDay.swapUndo = {};
+                loggerDay.swapUndo[String(exIdx)] = JSON.parse(JSON.stringify(
+                    { plan_name: ex.plan_name, sets: ex.sets }));
+                activeSession = swapToAlt(activeSession, exIdx, alt);
+            }
             persist(); renderView();
         });
         const skip = el('button', 'lex-act', '⤼ skip'); skip.type = 'button'; skip.dataset.act = 'skip';
@@ -1011,9 +1045,18 @@ if (typeof document !== 'undefined') (function () {
         document.body.classList.remove('logger-active');
     }
 
+    // Full re-render replaces .logger-scroll, whose scrollTop resets to 0 —
+    // without the restore below, every tap (set toggle, ⋯ menu, swap) snapped
+    // the gym view back to the top of the workout. Scroll is kept only when
+    // re-rendering the SAME view; switching live⇄review starts at the top.
     function renderView() {
         if (!overlay || !activeSession) return;
+        const prev = overlay.querySelector('.logger-scroll');
+        const keep = (renderedView === view && prev) ? prev.scrollTop : 0;
         if (view === 'review') renderReview(); else renderLive();
+        renderedView = view;
+        const next = overlay.querySelector('.logger-scroll');
+        if (next && keep) next.scrollTop = keep;
     }
 
     // ─── Card decoration (Start buttons + logged pills) ─────────────
