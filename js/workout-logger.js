@@ -346,6 +346,10 @@ if (typeof document !== 'undefined') (function () {
     const LS_ACTIVE_DAY = 'workouts:activeDay';   // UI companion (alts, sauna, skip) — not the contract
     const LS_UNSYNCED = 'workouts:unsynced';      // { id: sessionBody } failed/offline PUTs
     const LS_LOGGED = 'workouts:logged';          // { 'YYYY-MM-DD': id } local echo of finished sessions
+    const LS_REST_BY_EX = 'workouts:restByExercise'; // { exerciseName: seconds } — Strong-style per-exercise rest memory
+    const LS_REST_MUTED = 'workouts:restMuted';   // '1' when the end-of-rest beep is muted
+    const REST_DEFAULT = 90;                      // seconds — auto-rest length between sets (Scott 2026-07-09)
+    const REST_STEP = 15;                         // ± nudge granularity
 
     // ─── State ──────────────────────────────────────────────────────
     let activeSession = null;   // schema-1 session (or null)
@@ -358,6 +362,16 @@ if (typeof document !== 'undefined') (function () {
     let renderedView = null;    // view the overlay DOM currently shows (scroll-keep guard)
     const openWarm = new Set(); // exIdx whose warmup expander is open (survives re-render)
     const openMenu = new Set(); // exIdx whose ⋯ panel is open (survives re-render)
+
+    // Rest timer — transient (the running countdown lives only in memory; only
+    // the per-exercise durations persist). Distinct from the elapsed timer above.
+    let restEndsAt = null;      // ms epoch the current rest ends (null = idle)
+    let restTotal = 0;          // sec — full length of the current rest (ring + per-exercise save)
+    let restExName = null;      // exercise the rest is for (adjustments save under this name)
+    let restTickId = null;      // setInterval handle for the countdown
+    let restRang = false;       // already fired the end-of-rest beep this rest
+    let restPanelOpen = false;  // exact-seconds + mute expander open (survives re-render)
+    let audioCtx = null;        // lazily unlocked on a completion tap (iOS gesture rule)
 
     // ─── Tiny helpers ───────────────────────────────────────────────
     function pad(n) { return String(n).padStart(2, '0'); }
@@ -560,6 +574,7 @@ if (typeof document !== 'undefined') (function () {
 
     function discardSession() {
         stopTimer();
+        clearRest();
         clearActive();
         hideResumeBar();
         if (overlay) overlay.hidden = true;
@@ -575,10 +590,12 @@ if (typeof document !== 'undefined') (function () {
         document.body.classList.add('logger-active');
         renderView();
         startTimer();
+        if (restEndsAt !== null) startRestTick(); // resume a rest that survived a keep-close
     }
     // Close but keep the session alive (a resume bar takes over the plan view).
     function closeOverlayKeep() {
         stopTimer();
+        stopRestTick(); // keep rest state; the countdown resumes from wall-clock on reopen
         if (overlay) overlay.hidden = true;
         document.body.classList.remove('logger-active');
         if (activeSession) showResumeBar();
@@ -614,6 +631,186 @@ if (typeof document !== 'undefined') (function () {
         if (!overlay) return;
         const t = overlay.querySelector('.logger-timer');
         if (t) t.textContent = elapsedText();
+    }
+
+    // ─── Rest timer ─────────────────────────────────────────────────
+    // A work-set completion auto-starts a countdown (REST_DEFAULT, or the length
+    // remembered for that exercise). Adjustable in-workout (±15s / exact seconds
+    // / mute); beeps at zero. Separate from the elapsed-session timer above — that
+    // one counts up, this counts down between sets. The running countdown is
+    // transient (memory only); only the per-exercise durations persist.
+    function restDefaultFor(name) {
+        const map = readMap(LS_REST_BY_EX);
+        const v = name ? map[name] : null;
+        return (typeof v === 'number' && v > 0) ? v : REST_DEFAULT;
+    }
+    function saveRestFor(name, sec) {
+        if (!name || !(sec > 0)) return;
+        const map = readMap(LS_REST_BY_EX);
+        map[name] = sec;
+        writeMap(LS_REST_BY_EX, map);
+    }
+    function isMuted() {
+        try { return localStorage.getItem(LS_REST_MUTED) === '1'; } catch (e) { return false; }
+    }
+    function setMuted(b) {
+        try { localStorage.setItem(LS_REST_MUTED, b ? '1' : '0'); } catch (e) { /* */ }
+    }
+
+    // iOS Safari only plays WebAudio once a user gesture has unlocked a context.
+    // Unlock runs synchronously from the completion tap, so the end-of-rest beep
+    // (fired later from a timer, not a gesture) plays from an already-running ctx.
+    function unlockAudio() {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            if (!audioCtx) audioCtx = new Ctx();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        } catch (e) { audioCtx = null; }
+    }
+    function beep() {
+        if (isMuted() || !audioCtx) return;
+        try {
+            const t = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, t);
+            gain.gain.setValueAtTime(0.0001, t);
+            gain.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(t); osc.stop(t + 0.42);
+        } catch (e) { /* audio unavailable — the visual countdown still stands */ }
+    }
+
+    function restRemaining() {
+        if (restEndsAt === null) return null;
+        const ms = restEndsAt - Date.now();
+        return ms >= 0 ? Math.ceil(ms / 1000) : Math.floor(ms / 1000);
+    }
+    function startRestTick() {
+        stopRestTick();
+        restTickId = setInterval(restTick, 250); // sub-second so the beep lands near 0
+    }
+    function stopRestTick() {
+        if (restTickId) { clearInterval(restTickId); restTickId = null; }
+    }
+    function restTick() {
+        if (restEndsAt === null) { stopRestTick(); return; }
+        const ms = restEndsAt - Date.now();
+        if (ms <= 0 && !restRang) { restRang = true; beep(); }
+        if (ms <= -600000) stopRestTick(); // stop counting up 10 min past zero
+        syncRestBar();
+    }
+    function startRest(name) {
+        unlockAudio();
+        restExName = name || null;
+        restTotal = restDefaultFor(name);
+        restEndsAt = Date.now() + restTotal * 1000;
+        restRang = false;
+        startRestTick();
+        renderRestBar();
+    }
+    function clearRest() {
+        stopRestTick();
+        restEndsAt = null; restTotal = 0; restExName = null; restRang = false; restPanelOpen = false;
+        renderRestBar();
+    }
+    function nudgeRest(delta) {
+        if (restEndsAt === null) return;
+        restTotal = Math.max(REST_STEP, restTotal + delta);
+        restEndsAt = Math.max(Date.now(), restEndsAt + delta * 1000);
+        if (restEndsAt - Date.now() > 0) restRang = false;
+        saveRestFor(restExName, restTotal);
+        startRestTick();
+        syncRestBar();
+    }
+    function setRestSeconds(sec) {
+        if (restEndsAt === null || !(sec > 0)) return;
+        restTotal = sec;
+        restEndsAt = Date.now() + sec * 1000;
+        restRang = false;
+        saveRestFor(restExName, restTotal);
+        startRestTick();
+        syncRestBar();
+    }
+
+    function fmtCountdown(sec) {
+        const a = Math.abs(sec);
+        return (sec < 0 ? '+' : '') + Math.floor(a / 60) + ':' + pad(a % 60);
+    }
+    function buildRestBar() {
+        const bar = el('div', 'logger-rest');
+        bar.appendChild(el('div', 'logger-rest-fill'));
+
+        const main = el('div', 'logger-rest-main');
+        const time = el('button', 'logger-rest-time');
+        time.type = 'button';
+        time.setAttribute('aria-label', 'Rest options');
+        time.addEventListener('click', () => { restPanelOpen = !restPanelOpen; renderRestBar(); });
+        main.appendChild(time);
+
+        const ctrls = el('div', 'logger-rest-ctrls');
+        const minus = el('button', 'logger-rest-btn', '−15'); minus.type = 'button';
+        minus.addEventListener('click', () => nudgeRest(-REST_STEP));
+        const plus = el('button', 'logger-rest-btn', '+15'); plus.type = 'button';
+        plus.addEventListener('click', () => nudgeRest(REST_STEP));
+        const skip = el('button', 'logger-rest-skip', 'Skip'); skip.type = 'button';
+        skip.addEventListener('click', clearRest);
+        ctrls.appendChild(minus); ctrls.appendChild(plus); ctrls.appendChild(skip);
+        main.appendChild(ctrls);
+        bar.appendChild(main);
+
+        const panel = el('div', 'logger-rest-panel');
+        const secWrap = el('label', 'logger-rest-secwrap');
+        secWrap.appendChild(el('span', 'logger-rest-seclabel', 'Rest sec'));
+        const secInp = el('input', 'logger-rest-sec');
+        secInp.type = 'text'; secInp.inputMode = 'numeric'; secInp.autocomplete = 'off';
+        secInp.addEventListener('click', (e) => e.stopPropagation());
+        secInp.addEventListener('change', () => {
+            const v = num(secInp.value);
+            if (v && v > 0) setRestSeconds(Math.round(v));
+        });
+        secWrap.appendChild(secInp);
+        panel.appendChild(secWrap);
+        const mute = el('button', 'logger-rest-mute'); mute.type = 'button';
+        mute.addEventListener('click', () => { setMuted(!isMuted()); renderRestBar(); });
+        panel.appendChild(mute);
+        bar.appendChild(panel);
+        return bar;
+    }
+    function renderRestBar() {
+        if (!overlay) return;
+        let bar = overlay.querySelector('.logger-rest');
+        const active = restEndsAt !== null && view === 'live';
+        if (!active) { if (bar) bar.remove(); return; }
+        if (!bar) {
+            bar = buildRestBar();
+            const foot = overlay.querySelector('.logger-foot');
+            if (foot) overlay.insertBefore(bar, foot); else overlay.appendChild(bar);
+        }
+        syncRestBar(bar);
+    }
+    function syncRestBar(bar) {
+        bar = bar || (overlay && overlay.querySelector('.logger-rest'));
+        if (!bar) return;
+        const rem = restRemaining();
+        if (rem === null) return;
+        const over = rem < 0;
+        bar.classList.toggle('is-over', over);
+        bar.classList.toggle('is-open', restPanelOpen);
+        const time = bar.querySelector('.logger-rest-time');
+        if (time) time.textContent = over ? ('Done ' + fmtCountdown(rem)) : fmtCountdown(rem);
+        const fill = bar.querySelector('.logger-rest-fill');
+        if (fill) {
+            const frac = restTotal > 0 ? Math.max(0, Math.min(1, rem / restTotal)) : 0;
+            fill.style.width = (frac * 100).toFixed(1) + '%';
+        }
+        const sec = bar.querySelector('.logger-rest-sec');
+        if (sec && document.activeElement !== sec) sec.value = String(restTotal);
+        const mute = bar.querySelector('.logger-rest-mute');
+        if (mute) mute.textContent = isMuted() ? '🔇 Muted' : '🔔 Sound';
     }
 
     // ─── Progress ───────────────────────────────────────────────────
@@ -731,7 +928,19 @@ if (typeof document !== 'undefined') (function () {
         }
         persist();
         renderView();
-        if (!wasDone) pushSession(activeSession); // draft PUT on every completion
+        if (!wasDone) {
+            pushSession(activeSession); // draft PUT on every completion
+            onSetCompleted(exIdx, setIdx);
+        }
+    }
+
+    // The single place a completion fans out its side effects. The rest timer
+    // listens here; item 19's dummy view will route its complete button through
+    // the same event so both views behave identically (the plan's seam).
+    function onSetCompleted(exIdx, setIdx) {
+        document.dispatchEvent(new CustomEvent('logger:setCompleted', {
+            detail: { exIdx: exIdx, setIdx: setIdx },
+        }));
     }
 
     function unskip(exIdx) {
@@ -914,6 +1123,8 @@ if (typeof document !== 'undefined') (function () {
         fin.addEventListener('click', () => { view = 'review'; renderView(); });
         foot.appendChild(fin);
         overlay.appendChild(foot);
+
+        renderRestBar(); // a full re-render wipes the bar; re-add it if a rest is running
     }
 
     function refreshProgress() {
@@ -1040,6 +1251,7 @@ if (typeof document !== 'undefined') (function () {
         await pushSession(finished); // final PUT (or enqueue on failure)
         clearActive();
         stopTimer();
+        clearRest();
         hideResumeBar();
         overlay.hidden = true;
         document.body.classList.remove('logger-active');
@@ -1106,6 +1318,15 @@ if (typeof document !== 'undefined') (function () {
 
     document.addEventListener('workouts:rendered', decorateCards);
     window.addEventListener('online', flushQueue);
+
+    // Auto-start the rest timer on a WORK-set completion (warmup ramp steps don't rest).
+    document.addEventListener('logger:setCompleted', (e) => {
+        if (!activeSession) return;
+        const ex = activeSession.exercises[e.detail.exIdx];
+        const set = ex && ex.sets[e.detail.setIdx];
+        if (!set || set.kind !== 'work') return;
+        startRest(ex.plan_name);
+    });
     document.addEventListener('visibilitychange', () => {
         if (document.hidden && activeSession) pushSession(activeSession); // draft checkpoint
     });
@@ -1114,5 +1335,11 @@ if (typeof document !== 'undefined') (function () {
     window.__logger = {
         get session() { return activeSession; },
         startSession, openOverlay, decorateCards,
+        restState: function () {
+            return {
+                endsAt: restEndsAt, total: restTotal, exName: restExName,
+                remaining: restRemaining(), muted: isMuted(), panelOpen: restPanelOpen,
+            };
+        },
     };
 })();

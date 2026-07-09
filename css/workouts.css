@@ -948,6 +948,126 @@ body.mode-home .day-card.type-lift:not(.has-bw) .logger-start { display: none; }
     cursor: pointer;
 }
 
+/* ─── Rest timer bar (sits above the footer while a rest is running) ─ */
+
+.logger-rest {
+    position: relative;
+    overflow: hidden;
+    padding: 0.5rem 1rem;
+    border-top: 1.5px solid var(--light);
+    background: var(--white);
+}
+
+/* Depleting fill behind the controls — drains left→right as the rest counts down. */
+.logger-rest-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 100%;
+    background: var(--accent-light);
+    opacity: 0.26;
+    transition: width 0.25s linear;
+    pointer-events: none;
+}
+.logger-rest.is-over .logger-rest-fill {
+    width: 100% !important;
+    background: var(--warm);
+    opacity: 0.22;
+}
+
+.logger-rest-main {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.logger-rest-time {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    font-size: 1.5rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--black);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0.1rem 0;
+}
+.logger-rest-time::before { content: '⏱ '; font-size: 1rem; }
+.logger-rest.is-over .logger-rest-time { color: var(--warm); }
+
+.logger-rest-ctrls { display: flex; align-items: center; gap: 0.4rem; flex: 0 0 auto; }
+
+.logger-rest-btn {
+    min-width: 3.1rem;
+    min-height: 44px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--accent);
+    background: transparent;
+    border: 1.5px solid var(--gray-light);
+    border-radius: 10px;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+}
+.logger-rest-btn:active { background: var(--light); }
+
+.logger-rest-skip {
+    min-height: 44px;
+    padding: 0 0.75rem;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--gray);
+    background: transparent;
+    border: 1.5px solid var(--gray-light);
+    border-radius: 10px;
+    cursor: pointer;
+}
+.logger-rest-skip:active { background: var(--light); }
+
+.logger-rest-panel {
+    position: relative;
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--light);
+}
+.logger-rest.is-open .logger-rest-panel { display: flex; }
+
+.logger-rest-secwrap { display: flex; align-items: center; gap: 0.4rem; }
+.logger-rest-seclabel { font-size: 0.85rem; color: var(--gray); }
+.logger-rest-sec {
+    width: 4rem;
+    min-height: 40px;
+    padding: 0 0.4rem;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    color: var(--black);
+    background: var(--white);
+    border: 1.5px solid var(--gray-light);
+    border-radius: 8px;
+    font-variant-numeric: tabular-nums;
+}
+.logger-rest-mute {
+    min-height: 40px;
+    padding: 0 0.6rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 650;
+    color: var(--gray);
+    background: transparent;
+    border: 1.5px solid var(--gray-light);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
 /* ─── Review view ────────────────────────────────────────────────── */
 
 .rev-ex {
