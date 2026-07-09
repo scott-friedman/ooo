@@ -35,7 +35,8 @@
     const STROLL_MAX_DELAY = 120000;
     const STROLL_MIN_DIST = 3;        // grid units
     const STROLL_MAX_DIST = 8;
-    const STROLL_SPEED = 0.25;        // world units per second (grid / 10)
+    const STROLL_SPEED = 0.35;        // world units per second (grid / 10)
+    const WALK_CLIP_TIMESCALE = 0.5;  // slow walk clips toward the amble speed above
     const PROXIMITY_PAUSE_PX = 120;   // cursor this close = no strolling
     const COLLISION_RADIUS = 0.4;     // world units between figurines
 
@@ -56,11 +57,20 @@
     const PET_DELTAS = [15, 8, 3, 1];
     const PET_WINDOW_MS = 60000;
 
-    // Known system clip names - the fallback pool switchAnimation uses when a
-    // state has no direct match in its animMap (never custom user animations)
-    const SYSTEM_ANIMATIONS = ['idle', 'idle_loop', 'walk', 'walking', 'walk_loop',
-                               'dance', 'dancing', 'dance_loop', 'sleep', 'sleeping',
-                               'sit', 'sit_idle', 'eat', 'eating', 'chew', 'breathing_idle'];
+    // Clip-name keywords per state, tried in order. Substring match: Meshy
+    // exports name clips like "Armature|ymca_dance|baselayer", so an
+    // exact-name lookup never found anything. A state with no matching clip
+    // renders as a frozen pose + procedural motion (see freezePose).
+    const STATE_CLIP_KEYWORDS = {
+        idle: ['idle', 'breath'],
+        walking: ['walk', 'run', 'jog'],
+        dancing: ['dance', 'spin', 'jump', 'tantrum', 'twerk'],
+        sleeping: ['sleep', 'nap'],
+        eating: ['eat', 'chew', 'bite']
+    };
+    // Name of the idle clip synthesized for rigs that don't ship one
+    // (contains 'idle' so findClipForState picks it up naturally)
+    const GENERATED_IDLE = 'generated_relaxed_idle';
 
     // Emojis for particles
     const HEARTS = ['❤️', '💕', '💖', '💗', '💓'];
@@ -363,7 +373,10 @@
             obj.lastAnimState = animState;
 
             if (obj.mixer) obj.mixer.update(delta);
-            if (!obj.hasAnimations) {
+            // Static-pose models (holding a neutral pose because no clip
+            // fits the state) get the same procedural motion as clip-less
+            // models, layered on the root
+            if (!obj.hasAnimations || obj.staticPose) {
                 updateProceduralAnimation(id, obj, figurine, animState, t);
             }
 
@@ -486,9 +499,11 @@
                     obj.model.rotation.x = 0.09;
                     obj.model.rotation.z = 0;
                 } else {
-                    // Mii-like idle: gentle bobbing with occasional looking around
-                    const bobSpeed = 1.5 + Math.sin(personalTime * 0.3) * 0.3;
-                    obj.model.position.y = obj.baseY + Math.sin(personalTime * bobSpeed) * 0.03;
+                    // Mii-like idle: gentle bobbing with occasional looking
+                    // around. Fixed bob frequency - modulating it inside
+                    // sin(t * f(t)) accelerates the phase as t grows, which
+                    // turned the bob frantic after minutes on the page.
+                    obj.model.position.y = obj.baseY + Math.sin(personalTime * 1.5) * 0.03;
 
                     const lookCycle = Math.sin(personalTime * 0.2) + Math.sin(personalTime * 0.7) * 0.5;
                     obj.model.rotation.y = obj.baseRotationY + lookCycle * 0.15;
@@ -499,9 +514,10 @@
             }
 
             case 'walking':
-                obj.model.position.y = obj.baseY + Math.abs(Math.sin(time * 8)) * 0.1;
+                // Subtle shuffle - the old 0.1-unit hop read as bouncing
+                obj.model.position.y = obj.baseY + Math.abs(Math.sin(time * 6)) * 0.04;
                 obj.model.rotation.x = 0;
-                obj.model.rotation.z = Math.sin(time * 8) * 0.05;
+                obj.model.rotation.z = Math.sin(time * 6) * 0.03;
                 break;
 
             case 'dancing': {
@@ -939,6 +955,12 @@
         const minY = box.min.y;
         model.position.set(worldX, -minY, worldZ);
 
+        // Where tags anchor. Skinned boxes measure bind-pose geometry (the
+        // Meshy 1/100 trap), so use the normalized height for those.
+        const headY = (hasSkinnedMesh && skeletonHeight > 0.1)
+            ? TARGET_HEIGHT + 0.15
+            : box.getSize(new THREE.Vector3()).y + 0.15;
+
         // Enable shadows and fix materials for proper rendering
         model.traverse((child) => {
             if (child.isMesh) {
@@ -986,18 +1008,17 @@
             mixer = new THREE.AnimationMixer(model);
 
             gltf.animations.forEach((clip) => {
-                const name = clip.name.toLowerCase();
-                animations[name] = mixer.clipAction(clip);
-
-                if (name === 'idle' || name === 'idle_loop') {
-                    animations[name].play();
-                }
+                animations[clip.name.toLowerCase()] = mixer.clipAction(clip);
             });
-
-            if (!animations['idle'] && !animations['idle_loop'] && gltf.animations.length > 0) {
-                const firstAction = mixer.clipAction(gltf.animations[0]);
-                firstAction.play();
+            const hasIdleClip = Object.keys(animations).some(
+                (n) => STATE_CLIP_KEYWORDS.idle.some((kw) => n.includes(kw)));
+            if (!hasIdleClip) {
+                animations[GENERATED_IDLE] = mixer.clipAction(buildGeneratedIdleClip(model));
             }
+            // Nothing plays here: the first animate() frame runs
+            // switchAnimation, which starts the right clip for the state.
+            // Playing one directly bypassed currentAction tracking, so it
+            // kept running under every later clip (the deformed-model bug).
         }
 
         // Use saved rotation from Firebase, or default to facing forward (toward camera)
@@ -1008,7 +1029,8 @@
             hasAnimations,
             baseY: model.position.y,
             baseRotationY: savedRotation,
-            baseScale: scale
+            baseScale: scale,
+            headY
         });
 
         scene.add(model);
@@ -1060,6 +1082,8 @@
             baseY: opts.baseY,
             baseRotationY: opts.baseRotationY || 0,
             baseScale: opts.baseScale ?? 1,
+            headY: opts.headY ?? 2.8,
+            staticPose: false,
             screenPos: null,
             cachedStats: null,
             tagEl: null,
@@ -1078,7 +1102,7 @@
         mesh.position.set(worldX, 1, worldZ);
         mesh.castShadow = true;
 
-        figurineObjects[id] = makeFigurineObject(id, mesh, { baseY: 1 });
+        figurineObjects[id] = makeFigurineObject(id, mesh, { baseY: 1, headY: 2.2 });
 
         scene.add(mesh);
         createTag(id, figurine);
@@ -1134,53 +1158,108 @@
     // Animation clip switching
     // =========================================================================
 
+    function findClipForState(obj, state) {
+        const keywords = STATE_CLIP_KEYWORDS[state] || STATE_CLIP_KEYWORDS.idle;
+        for (const kw of keywords) {
+            for (const name of Object.keys(obj.animations)) {
+                if (name.includes(kw)) return obj.animations[name];
+            }
+        }
+        return null;
+    }
+
+    function configureActionForState(action, state) {
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.setEffectiveTimeScale(state === 'walking' ? WALK_CLIP_TIMESCALE : 1);
+    }
+
     function switchAnimation(obj, newState) {
         if (!obj.mixer || !obj.hasAnimations) return;
 
-        // Map states to animation names
-        const animMap = {
-            'idle': ['idle', 'idle_loop', 'breathing_idle'],
-            'walking': ['walk', 'walking', 'walk_loop'],
-            'dancing': ['dance', 'dancing', 'dance_loop'],
-            'sleeping': ['sleep', 'sleeping', 'sit', 'sit_idle'],
-            'eating': ['eat', 'eating', 'chew']
-        };
+        // No clip fits this state: fall back to the neutral idle pose (real
+        // or generated) and let updateProceduralAnimation supply the motion
+        let action = findClipForState(obj, newState);
+        let isStatic = false;
+        if (!action) {
+            action = findClipForState(obj, 'idle');
+            isStatic = true;
+        }
+        if (!action) return;
 
-        const animNames = animMap[newState] || ['idle'];
-        let newAction = null;
+        configureActionForState(action, isStatic ? 'idle' : newState);
+        if (action === obj.currentAction) {
+            // Same clip, new state: restart without a crossfade - fading a
+            // clip against itself dips through the bind pose
+            action.reset();
+            action.setEffectiveWeight(1);
+            action.play();
+        } else {
+            if (obj.currentAction) obj.currentAction.fadeOut(0.3);
+            action.reset().fadeIn(0.3).play();
+            obj.currentAction = action;
+        }
+        obj.staticPose = isStatic || action === obj.animations[GENERATED_IDLE];
+    }
 
-        for (const name of animNames) {
-            if (obj.animations[name]) {
-                newAction = obj.animations[name];
-                break;
+    /**
+     * Synthesized idle for rigs that ship without one (Meshy emote exports).
+     * An empty clip holds the bind pose - natural for scans rigged in their
+     * scanned stance. If the bind pose is a T-pose (armspan comparable to
+     * height), add single-keyframe tracks that swing each upper arm down to
+     * the body's side. Faded-out clips blend back to the bind pose, so
+     * crossfading into this clip works like any other.
+     * Must run while the skeleton is still in its bind pose (before the
+     * mixer first updates).
+     */
+    function buildGeneratedIdleClip(model) {
+        const tracks = [];
+        model.updateMatrixWorld(true);
+
+        const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+        const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+        const p = new THREE.Vector3();
+        model.traverse((n) => {
+            if (n.isBone) {
+                n.getWorldPosition(p);
+                min.min(p);
+                max.max(p);
             }
+        });
+        const height = max.y - min.y;
+        const span = Math.max(max.x - min.x, max.z - min.z);
+
+        if (height > 0.1 && span / height > 0.6) {
+            ['Left', 'Right'].forEach((side) => {
+                let arm = null, fore = null;
+                model.traverse((n) => {
+                    if (!n.isBone) return;
+                    if (n.name.endsWith(side + 'Arm') && !n.name.includes('Fore')) arm = n;
+                    if (n.name.endsWith(side + 'ForeArm')) fore = n;
+                });
+                if (!arm || !fore) return;
+
+                const armPos = new THREE.Vector3();
+                const forePos = new THREE.Vector3();
+                arm.getWorldPosition(armPos);
+                fore.getWorldPosition(forePos);
+                const dir = forePos.sub(armPos).normalize();
+                // Mostly down, slightly outward so hands clear the hips
+                const target = new THREE.Vector3(side === 'Left' ? 0.12 : -0.12, -1, 0.05).normalize();
+                const deltaWorld = new THREE.Quaternion().setFromUnitVectors(dir, target);
+                const parentWorld = new THREE.Quaternion();
+                arm.parent.getWorldQuaternion(parentWorld);
+                // World-space delta expressed locally: P^-1 * delta * P, on
+                // top of the bind rotation
+                const q = parentWorld.clone().invert()
+                    .multiply(deltaWorld)
+                    .multiply(parentWorld)
+                    .multiply(arm.quaternion);
+                tracks.push(new THREE.QuaternionKeyframeTrack(
+                    arm.name + '.quaternion', [0], [q.x, q.y, q.z, q.w]));
+            });
         }
 
-        // Fallback to first SYSTEM animation only (not custom emotes)
-        if (!newAction) {
-            for (const name of SYSTEM_ANIMATIONS) {
-                if (obj.animations[name]) {
-                    newAction = obj.animations[name];
-                    break;
-                }
-            }
-        }
-
-        if (!newAction) {
-            if (obj.currentAction) {
-                obj.currentAction.fadeOut(0.3);
-                obj.currentAction = null;
-            }
-            return;
-        }
-
-        if (newAction !== obj.currentAction) {
-            if (obj.currentAction) {
-                obj.currentAction.fadeOut(0.3);
-            }
-            newAction.reset().fadeIn(0.3).play();
-            obj.currentAction = newAction;
-        }
+        return new THREE.AnimationClip(GENERATED_IDLE, 1, tracks);
     }
 
     // =========================================================================
@@ -1237,9 +1316,8 @@
         Object.entries(figurineObjects).forEach(([id, obj]) => {
             if (!obj.model) return;
 
-            // Feet sit at y=0 and models are ~2.6 tall, so the head is at a
-            // fixed world height regardless of the model's origin
-            vector.set(obj.model.position.x, 2.8, obj.model.position.z);
+            // Feet sit at y=0; headY is this model's measured height
+            vector.set(obj.model.position.x, obj.headY, obj.model.position.z);
             vector.project(camera);
 
             const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
