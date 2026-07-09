@@ -18,6 +18,7 @@ const {
     parseRepScheme, buildSession, completeSet, uncompleteSet, editSet,
     addSet, removeSet, swapToAlt, swapBack, skipExercise, setExerciseNotes,
     setExerciseRpe, finishSession,
+    platesPerSide, platesLabel, fmtNum, planPlateKeys, nameInitials, barbellFlags,
 } = require('../js/workout-logger.js');
 const { parseDescription } = require('../js/workouts.js');
 
@@ -196,4 +197,84 @@ test('mutations do not mutate their input', () => {
     editSet(base, 0, 0, { reps: 99 });
     finishSession(base, { finishedAt: '2026-07-08T10:00' });
     assert.deepStrictEqual(base, snapshot);
+});
+
+// ─── Plate math (item 10) ───────────────────────────────────────────
+// Client-side twin of scripts/lib.py — same plate set, 45-lb bar, greedy
+// per-side decomposition. These pin the same per-side values test_warmup.py
+// asserts and the exact `Plates ·` tokens the live plan emits.
+
+test('fmtNum: integers bare, halves with one decimal', () => {
+    assert.strictEqual(fmtNum(45), '45');
+    assert.strictEqual(fmtNum(2.5), '2.5');
+    assert.strictEqual(fmtNum(7.5), '7.5');
+    assert.strictEqual(fmtNum(12.5), '12.5');
+    assert.strictEqual(fmtNum(NaN), '');
+});
+
+test('platesPerSide: greedy decomposition, sums, and unreachable → null', () => {
+    // Per-side SUMS match the deadlift-210 ramp rungs test_warmup.py pins.
+    const sum = (a) => a.reduce((x, y) => x + y, 0);
+    assert.strictEqual(sum(platesPerSide(85)), 20);   // 10+10
+    assert.strictEqual(sum(platesPerSide(115)), 35);  // 35
+    assert.strictEqual(sum(platesPerSide(145)), 50);  // 45+5
+    assert.strictEqual(sum(platesPerSide(180)), 67.5); // 45+10+10+2.5
+    // Exact stacks, largest-first.
+    assert.deepStrictEqual(platesPerSide(145), [45, 5]);
+    assert.deepStrictEqual(platesPerSide(205), [45, 35]);
+    assert.deepStrictEqual(platesPerSide(60), [5, 2.5]);
+    assert.deepStrictEqual(platesPerSide(50), [2.5]);
+    // At/below the bar → null; non-decomposable per-side (0.5) → null.
+    assert.strictEqual(platesPerSide(45), null);
+    assert.strictEqual(platesPerSide(40), null);
+    assert.strictEqual(platesPerSide(46), null);
+    assert.strictEqual(platesPerSide(null), null);
+    // A non-default bar: (75-35)/2 = 20 per side.
+    assert.deepStrictEqual(platesPerSide(75, 35), [10, 10]);
+});
+
+test('platesLabel reproduces the live plan Plates · tokens exactly', () => {
+    assert.strictEqual(platesLabel(145), '45+5/side');    // A2 T1 Bench 145
+    assert.strictEqual(platesLabel(120), '35+2.5/side');  // A1 T2 Bench 120
+    assert.strictEqual(platesLabel(95), '25/side');       // B1 T1 OHP 95 / A2 T2 RDL 95
+    assert.strictEqual(platesLabel(205), '45+35/side');   // B1 T2 Deadlift 205
+    assert.strictEqual(platesLabel(105), '25+5/side');    // A2 T3 CGBP 105
+    assert.strictEqual(platesLabel(46), null);            // not plate-reachable
+});
+
+test('planPlateKeys + nameInitials parse tier codes and abbreviations', () => {
+    assert.deepStrictEqual(
+        planPlateKeys(['T1 45+5/side', 'T2 25/side', 'CGBP 25+5/side']),
+        ['T1', 'T2', 'CGBP']);
+    assert.deepStrictEqual(planPlateKeys(null), []);
+    assert.strictEqual(nameInitials('Close-Grip Bench Press'), 'CGBP');
+    assert.strictEqual(nameInitials('Bench Press'), 'BP');
+    assert.strictEqual(nameInitials('Leg Press'), 'LP');
+});
+
+test('barbellFlags: only lifts named in the Plates line, machines excluded', () => {
+    // A2 Bench day — CGBP (T3) is barbell via initials; Cable Crossover / Lat
+    // Pulldown are not in the Plates line → false.
+    assert.deepStrictEqual(
+        barbellFlags(
+            [{ tier: 'T1', name: 'Bench Press' },
+             { tier: 'T2', name: 'Romanian Deadlift' },
+             { tier: 'T3', name: 'Cable Crossover' },
+             { tier: 'T3', name: 'Lat Pulldown' },
+             { tier: 'T3', name: 'Close-Grip Bench Press' }],
+            ['T1 45+5/side', 'T2 25/side', 'CGBP 25+5/side']),
+        [true, true, false, false, true]);
+    // A1 Leg Press day — the T1 is a MACHINE, absent from the Plates line → false.
+    assert.deepStrictEqual(
+        barbellFlags(
+            [{ tier: 'T1', name: 'Leg Press' },
+             { tier: 'T2', name: 'Bench Press' },
+             { tier: 'T3', name: 'Seated Leg Curl' },
+             { tier: 'T3', name: 'DB Row' },
+             { tier: 'T3', name: 'Cable Crunch' }],
+            ['T2 35+2.5/side']),
+        [false, true, false, false, false]);
+    // No plates line → nothing barbell.
+    assert.deepStrictEqual(
+        barbellFlags([{ tier: 'T1', name: 'Bench Press' }], null), [false]);
 });

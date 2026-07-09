@@ -72,6 +72,84 @@ function parseWeight(str) {
     return m ? parseFloat(m[1]) : null;
 }
 
+// ─── Plate math (pure) ──────────────────────────────────────────────
+// Client-side twin of scripts/lib.py's plate primitives: same plate set, same
+// 45-lb bar, same greedy per-side decomposition that renders the plan's
+// `Plates · …/side` footer. Used to show a live plate stack under a barbell set
+// whose weight Scott edited away from the prescription (the plan's static hint
+// is then stale). Item 19's focus view feature-detects platesLabel too.
+
+// Plates available per side, largest-first (greedy order) — matches lib.py PLATES.
+const PLATE_SET = [45, 35, 25, 10, 5, 2.5];
+
+/** Format a plate/load: integers bare (45), halves with one decimal (2.5). */
+function fmtNum(x) {
+    if (typeof x !== 'number' || !isFinite(x)) return '';
+    return x === Math.round(x) ? String(Math.round(x)) : String(x);
+}
+
+/**
+ * Greedy per-side plate decomposition for a `load` on a `bar`-lb bar (default
+ * 45). Returns the per-side plate list largest-first, or null when the load is
+ * at/below the bar or the per-side weight isn't exactly reachable.
+ *   platesPerSide(145) → [45, 5]   (per side 50)
+ *   platesPerSide(205) → [45, 35]  (per side 80)
+ *   platesPerSide(60)  → [5, 2.5]  (per side 7.5)
+ *   platesPerSide(46)  → null      (0.5/side not reachable)
+ */
+function platesPerSide(load, bar) {
+    bar = (typeof bar === 'number') ? bar : 45;
+    if (typeof load !== 'number' || !isFinite(load) || load <= bar) return null;
+    let remaining = Math.round(((load - bar) / 2) * 100) / 100;
+    if (remaining < 0) return null;
+    const out = [];
+    for (const p of PLATE_SET) {
+        while (remaining >= p - 1e-9) {
+            remaining = Math.round((remaining - p) * 100) / 100;
+            out.push(p);
+        }
+    }
+    return Math.abs(remaining) < 1e-9 ? out : null;
+}
+
+/** "45+5/side" plate-stack label for a barbell load; null when not decomposable. */
+function platesLabel(load, bar) {
+    const plates = platesPerSide(load, bar);
+    if (!plates || !plates.length) return null;
+    return plates.map(fmtNum).join('+') + '/side';
+}
+
+/** Leading key of each `Plates ·` token: "T1 45+5/side" → "T1", "CGBP …" → "CGBP". */
+function planPlateKeys(plates) {
+    if (!Array.isArray(plates)) return [];
+    return plates
+        .map((tok) => { const m = String(tok).trim().match(/^(\S+)/); return m ? m[1] : null; })
+        .filter(Boolean);
+}
+
+/** Word initials of an exercise name: "Close-Grip Bench Press" → "CGBP". */
+function nameInitials(name) {
+    return String(name || '').split(/[\s-]+/).filter(Boolean)
+        .map((w) => w[0].toUpperCase()).join('');
+}
+
+/**
+ * Which plan exercises are barbell lifts — i.e. named in the `Plates ·` footer,
+ * by tier code (T1/T2) or by name-initials abbreviation (CGBP). Machine and
+ * cable lifts (Leg Press, Cable Crossover) are absent from that line, so they
+ * come back false and never get a live plate hint. `exercises` = day.exercises
+ * (parseDescription rows: {tier, name, …}); returns a boolean[] aligned to it.
+ */
+function barbellFlags(exercises, plates) {
+    const keySet = new Set(planPlateKeys(plates));
+    return (exercises || []).map((ex) => {
+        if (!keySet.size) return false;
+        if (ex.tier && keySet.has(ex.tier)) return true;
+        const ini = nameInitials(ex.name);
+        return ini.length > 0 && keySet.has(ini);
+    });
+}
+
 // ─── Set builders (pure) ────────────────────────────────────────────
 
 /** Build the work sets for one exercise from its scheme at a fixed weight. */
@@ -319,6 +397,7 @@ if (typeof module !== 'undefined' && module.exports) {
         completeSet, uncompleteSet, editSet, addSet, removeSet,
         swapToAlt, swapBack, skipExercise, setExerciseNotes, setExerciseRpe,
         finishSession, DAY_LABELS,
+        platesPerSide, platesLabel, fmtNum, planPlateKeys, nameInitials, barbellFlags,
     };
 }
 
@@ -435,6 +514,7 @@ if (typeof document !== 'undefined') (function () {
         } catch (e) { activeSession = null; loggerDay = null; }
         if (loggerDay && !Array.isArray(loggerDay.skipped)) loggerDay.skipped = [];
         if (loggerDay && (!loggerDay.swapUndo || typeof loggerDay.swapUndo !== 'object')) loggerDay.swapUndo = {};
+        if (loggerDay && !Array.isArray(loggerDay.barbell)) loggerDay.barbell = [];
     }
 
     function clearActive() {
@@ -564,6 +644,11 @@ if (typeof document !== 'undefined') (function () {
             saunaDefault: extractSaunaMinutes(day.sauna),
             skipped: [],
             swapUndo: {},
+            // Which exercises are barbell (from the plan's `Plates ·` footer) — a
+            // live plate stack shows under any barbell set edited off-prescription.
+            // Home mode has no barbell lifts. `plates` stashed for item 19's seam.
+            barbell: mode === 'home' ? [] : barbellFlags(day.exercises, day.plates),
+            plates: day.plates || null,
         };
         openWarm.clear();
         openMenu.clear();
@@ -575,6 +660,7 @@ if (typeof document !== 'undefined') (function () {
     function discardSession() {
         stopTimer();
         clearRest();
+        releaseWakeLock();
         clearActive();
         hideResumeBar();
         if (overlay) overlay.hidden = true;
@@ -590,12 +676,14 @@ if (typeof document !== 'undefined') (function () {
         document.body.classList.add('logger-active');
         renderView();
         startTimer();
+        acquireWakeLock();
         if (restEndsAt !== null) startRestTick(); // resume a rest that survived a keep-close
     }
     // Close but keep the session alive (a resume bar takes over the plan view).
     function closeOverlayKeep() {
         stopTimer();
         stopRestTick(); // keep rest state; the countdown resumes from wall-clock on reopen
+        releaseWakeLock();
         if (overlay) overlay.hidden = true;
         document.body.classList.remove('logger-active');
         if (activeSession) showResumeBar();
@@ -607,6 +695,26 @@ if (typeof document !== 'undefined') (function () {
         overlay.hidden = true;
         document.body.appendChild(overlay);
     }
+
+    // ─── Wake lock (item 12) ────────────────────────────────────────
+    // Hold a screen wake lock while the session overlay is open so the phone
+    // doesn't sleep between sets. iOS drops the lock whenever the tab hides, so
+    // the visibilitychange handler re-acquires on return. Feature-detected —
+    // a no-op on browsers without the API (Safari <16.4).
+    let wakeLock = null;
+    async function acquireWakeLock() {
+        if (!('wakeLock' in navigator) || wakeLock) return;
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => { wakeLock = null; });
+        } catch (e) { wakeLock = null; } // rejects when not visible/allowed — harmless
+    }
+    function releaseWakeLock() {
+        if (!wakeLock) return;
+        try { wakeLock.release(); } catch (e) { /* */ }
+        wakeLock = null;
+    }
+    function overlayOpen() { return !!(overlay && !overlay.hidden && activeSession); }
 
     // ─── Timer ──────────────────────────────────────────────────────
     function startTimer() {
@@ -905,7 +1013,10 @@ if (typeof document !== 'undefined') (function () {
                 activeSession = editSet(activeSession, exIdx, setIdx, readRowPatch(row, s));
                 persist();
                 if (view === 'live') refreshProgress();
+                updatePlateHint(row, exIdx, setIdx);
             });
+            // Live plate stack tracks the weight field as it's typed (hint only, no persist).
+            inp.addEventListener('input', () => updatePlateHint(row, exIdx, setIdx));
             inp.addEventListener('click', (e) => e.stopPropagation());
             // Select-all on focus: re-entering a prefilled field types clean —
             // no backspacing over the prescription (item 25).
@@ -917,7 +1028,29 @@ if (typeof document !== 'undefined') (function () {
             if (e.target.closest('input')) return;
             toggleSet(exIdx, setIdx, row);
         });
+        updatePlateHint(row, exIdx, setIdx); // show immediately if resumed mid-edit
         return row;
+    }
+
+    // Live plate stack under a barbell work set whose weight was edited off the
+    // prescription (item 10). The plan's `Plates ·` footer already covers the
+    // prescribed weight, so the hint appears only once the field diverges and the
+    // load decomposes exactly; it clears when the weight returns to target or
+    // won't reach on the plate set. Swapped exercises (DB/cable alts) never show it.
+    function updatePlateHint(rowEl, exIdx, setIdx) {
+        if (!rowEl) return;
+        const existing = rowEl.querySelector('.set-plates');
+        const ex = activeSession && activeSession.exercises[exIdx];
+        const set = ex && ex.sets[setIdx];
+        const isBarbell = !!(loggerDay && loggerDay.barbell && loggerDay.barbell[exIdx]) && ex && !ex.swapped_from;
+        const target = set && set.target ? set.target.weight : null;
+        const wEl = rowEl.querySelector('.set-weight');
+        const weight = wEl ? num(wEl.value) : null;
+        const edited = weight !== null && target !== null && weight !== target;
+        const label = (isBarbell && edited) ? platesLabel(weight, 45) : null;
+        if (!label) { if (existing) existing.remove(); return; }
+        const hint = existing || rowEl.appendChild(el('div', 'set-plates'));
+        hint.textContent = label;
     }
 
     // Surgically sync ONE set row's done-state visuals to the model — no
@@ -1089,9 +1222,35 @@ if (typeof document !== 'undefined') (function () {
             const v = num(rpe.value);
             activeSession = setExerciseRpe(activeSession, exIdx, v);
             persist();
+            syncChips(v);
         });
         rf.appendChild(rpe);
         panel.appendChild(rf);
+
+        // Quick RPE chips (item 11): 7–10 by .5 → the rpe field in one tap; the
+        // active chip highlights, re-tapping it clears. Manual typing syncs too.
+        // Feeds the same rpe field → @rpe token via the Strong-note renderer.
+        const chips = el('div', 'lex-rpe-chips');
+        function syncChips(val) {
+            chips.querySelectorAll('.rpe-chip').forEach((c) => {
+                c.classList.toggle('is-on', parseFloat(c.dataset.rpe) === val);
+            });
+        }
+        [7, 7.5, 8, 8.5, 9, 9.5, 10].forEach((v) => {
+            const chip = el('button', 'rpe-chip', fmtNum(v));
+            chip.type = 'button';
+            chip.dataset.rpe = String(v);
+            chip.addEventListener('click', () => {
+                const next = num(rpe.value) === v ? null : v; // re-tap clears
+                rpe.value = next === null ? '' : String(next);
+                activeSession = setExerciseRpe(activeSession, exIdx, next);
+                persist();
+                syncChips(next);
+            });
+            chips.appendChild(chip);
+        });
+        syncChips((ex.rpe === null || ex.rpe === undefined) ? null : ex.rpe);
+        panel.appendChild(chips);
 
         return panel;
     }
@@ -1326,6 +1485,7 @@ if (typeof document !== 'undefined') (function () {
         clearActive();
         stopTimer();
         clearRest();
+        releaseWakeLock();
         hideResumeBar();
         overlay.hidden = true;
         document.body.classList.remove('logger-active');
@@ -1433,7 +1593,11 @@ if (typeof document !== 'undefined') (function () {
         startRest(ex.plan_name);
     });
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden && activeSession) pushSession(activeSession); // draft checkpoint
+        if (document.hidden) {
+            if (activeSession) pushSession(activeSession); // draft checkpoint
+        } else if (overlayOpen()) {
+            acquireWakeLock(); // iOS dropped the lock while hidden — take it back
+        }
     });
 
     // Expose a tiny hook for tests / debugging (never used by the page itself).
@@ -1446,5 +1610,7 @@ if (typeof document !== 'undefined') (function () {
                 remaining: restRemaining(), muted: isMuted(), panelOpen: restPanelOpen,
             };
         },
+        wakeLockHeld: function () { return !!wakeLock; },
+        loggerDay: function () { return loggerDay; },
     };
 })();

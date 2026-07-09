@@ -855,6 +855,33 @@ body.mode-home .day-card.type-lift:not(.has-bw) .logger-start { display: none; }
     border-radius: 10px;
 }
 
+/* Quick RPE chips (item 11): one-tap 7–10 by .5 above the manual field. */
+.lex-rpe-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+}
+.rpe-chip {
+    flex: 1 1 auto;
+    min-width: 2.6rem;
+    min-height: 40px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--gray);
+    background: var(--white);
+    border: 1.5px solid var(--gray-light);
+    border-radius: 10px;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+}
+.rpe-chip.is-on {
+    color: var(--white);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
 .lex-notes-view {
     margin: 0.4rem 0 0;
     font-size: 0.85rem;
@@ -890,6 +917,7 @@ body.mode-home .day-card.type-lift:not(.has-bw) .logger-start { display: none; }
 .set-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.6rem;
     min-height: 56px;
     padding: 0.35rem 0.25rem;
@@ -937,6 +965,19 @@ body.mode-home .day-card.type-lift:not(.has-bw) .logger-start { display: none; }
 .set-x, .set-unit {
     font-size: 0.9rem;
     color: var(--gray);
+}
+
+/* Live plate stack for an edited barbell weight (item 10) — full-width line
+   under the fields, aligned to the number inputs (past the set-num gutter). */
+.set-plates {
+    flex-basis: 100%;
+    margin-left: 2.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
 }
 
 .set-check {
