@@ -319,6 +319,7 @@ function renderDayCard(evt, todayStr) {
         const pre = el('pre', 'raw-fallback', evt.description || '');
         card.appendChild(pre);
     }
+    card.planDay = { evt: evt, cls: cls, parsed: parsed, isToday: isToday, isPast: isPast }; // logger hook (additive)
     return card;
 }
 
@@ -362,6 +363,8 @@ function renderPlan(plan, fetchedAt, stale) {
     const target = document.getElementById('today')
         || daysEl.querySelector('article.day-card:not(.past)');
     if (target) target.scrollIntoView({ block: 'start' });
+
+    document.dispatchEvent(new CustomEvent('workouts:rendered')); // logger hook (additive)
 }
 
 // ─── Mode toggle ────────────────────────────────────────────────────
