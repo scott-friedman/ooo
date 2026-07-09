@@ -17,8 +17,8 @@
  * Environment Variables (set via wrangler secret):
  * - FIREBASE_SECRET: RTDB database secret (wrangler secret put FIREBASE_SECRET
  *   --config wrangler-figurines.toml)
- * - RESEND_API_KEY: Resend API key for sending email (requires one-time
- *   domain verification of scottfriedman.ooo in the Resend dashboard)
+ * - RESEND_API_KEY: Resend API key for sending email (sender domain
+ *   foobos.net, already verified in the Resend dashboard)
  *
  * Deploy: npx wrangler deploy --config wrangler-figurines.toml
  */
@@ -38,7 +38,9 @@ function workerUrl(env) {
 }
 
 const PAGE_URL = 'https://scottfriedman.ooo/figurines.html';
-const EMAIL_FROM = "Scott's Figurines <figurines@scottfriedman.ooo>";
+// Sends from foobos.net - the already-verified Resend domain. The free plan
+// allows one domain, and verifying scottfriedman.ooo would need a paid tier.
+const EMAIL_FROM = "Scott's Figurines <figurines@foobos.net>";
 
 // CORS - only the signup POST is called cross-origin from the site
 const ALLOWED_ORIGINS = ['https://scottfriedman.ooo'];
