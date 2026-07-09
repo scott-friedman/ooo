@@ -23,3 +23,6 @@ stickynotes-plan.md
 # Repo audit — documents not-yet-fixed attack vectors; the repo is public
 # and served at scottfriedman.ooo, so keep this local
 IMPROVEMENTS.md
+
+# Workout-logger golden contract fixtures — personal training data; source of truth is the me repo
+tests/fixtures/app-sessions/
