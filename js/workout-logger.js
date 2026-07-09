@@ -537,7 +537,7 @@ if (typeof document !== 'undefined') (function () {
         const discard = el('button', 'logger-resume-discard', 'Discard');
         discard.type = 'button';
         discard.addEventListener('click', () => {
-            if (confirm('Discard this in-progress workout?')) discardSession();
+            inlineConfirm(discard, 'Discard workout?', discardSession);
         });
         btns.appendChild(resume);
         btns.appendChild(discard);
@@ -907,6 +907,9 @@ if (typeof document !== 'undefined') (function () {
                 if (view === 'live') refreshProgress();
             });
             inp.addEventListener('click', (e) => e.stopPropagation());
+            // Select-all on focus: re-entering a prefilled field types clean —
+            // no backspacing over the prescription (item 25).
+            inp.addEventListener('focus', () => { try { inp.select(); } catch (e) { /* */ } });
         });
 
         // Big tap target: tapping the row (anywhere but an input) toggles done.
@@ -917,21 +920,84 @@ if (typeof document !== 'undefined') (function () {
         return row;
     }
 
+    // Surgically sync ONE set row's done-state visuals to the model — no
+    // rebuild, so scrollTop and document.activeElement survive a tap under the
+    // finger (item 22). Mirrors the done / AMRAP branches of renderSetRow.
+    function refreshSetRow(exIdx, setIdx, rowEl) {
+        if (!rowEl) return;
+        const set = activeSession.exercises[exIdx].sets[setIdx];
+        rowEl.classList.toggle('is-done', !!set.done);
+        const check = rowEl.querySelector('.set-check');
+        if (check) {
+            check.textContent = set.done ? '✓' : '';
+            check.setAttribute('aria-label', set.done ? 'Mark set not done' : 'Complete set');
+        }
+        // An uncompleted AMRAP returns to its "max reps" placeholder (a full
+        // re-render blanks it; match that so a re-tap re-arms via item 23).
+        if (!set.done && set.target && set.target.amrap) {
+            const r = rowEl.querySelector('.set-reps');
+            if (r) r.value = '';
+        }
+    }
+
+    // Update an exercise's "n/m sets" count in place after a toggle.
+    function refreshExerciseCount(exIdx) {
+        if (!overlay) return;
+        const sec = overlay.querySelector('.lex[data-ex="' + exIdx + '"]');
+        const c = sec && sec.querySelector('.lex-count');
+        if (!c) return;
+        const work = activeSession.exercises[exIdx].sets.filter((s) => s.kind === 'work');
+        c.textContent = work.filter((s) => s.done).length + '/' + work.length + ' sets';
+    }
+
+    // The single choke point for a set COMPLETION — full view today, item 19's
+    // dummy view tomorrow. Mutate → un-skip → persist → in-place DOM refresh →
+    // draft PUT → dispatch logger:setCompleted (the rest timer's auto-start hook).
+    // A dummy-mode tap routed here yields the byte-identical schema-1 mutation and
+    // draft PUT as a full-view tap. `rowEl` present → surgical refresh; absent
+    // (dummy view) → the caller re-renders itself.
+    function commitCompletion(exIdx, setIdx, patch, rowEl) {
+        activeSession = completeSet(activeSession, exIdx, setIdx, patch);
+        unskip(exIdx);
+        persist();
+        refreshSetRow(exIdx, setIdx, rowEl);
+        refreshExerciseCount(exIdx);
+        if (view === 'live') refreshProgress();
+        pushSession(activeSession);       // draft PUT on every completion
+        onSetCompleted(exIdx, setIdx);    // rest timer + future dummy view
+    }
+
     function toggleSet(exIdx, setIdx, rowEl) {
         const set = activeSession.exercises[exIdx].sets[setIdx];
-        const wasDone = set.done;
-        if (wasDone) {
+        if (set.done) {
+            // Uncomplete: surgical, no draft PUT / event (matches prior behavior —
+            // drafts never reach the pipeline, and finish sends the final PUT).
             activeSession = uncompleteSet(activeSession, exIdx, setIdx);
-        } else {
-            activeSession = completeSet(activeSession, exIdx, setIdx, readRowPatch(rowEl, set));
-            unskip(exIdx);
+            persist();
+            refreshSetRow(exIdx, setIdx, rowEl);
+            refreshExerciseCount(exIdx);
+            if (view === 'live') refreshProgress();
+            return;
         }
-        persist();
-        renderView();
-        if (!wasDone) {
-            pushSession(activeSession); // draft PUT on every completion
-            onSetCompleted(exIdx, setIdx);
+        const patch = readRowPatch(rowEl, set);
+        // AMRAP type-to-arm (item 23): an AMRAP set's reps ARE the progression
+        // signal, so never silently log the scheme's base reps — require a typed
+        // count before the row can complete. (Full-view analogue of the dummy
+        // view's disabled complete button; the pure core is untouched.)
+        if (set.target && set.target.amrap) {
+            const r = rowEl && rowEl.querySelector('.set-reps');
+            if (!r || r.value.trim() === '' || num(r.value) === null) { nudgeForReps(rowEl); return; }
         }
+        commitCompletion(exIdx, setIdx, patch, rowEl);
+    }
+
+    // Visual nudge when an AMRAP completion is blocked for want of a rep count.
+    function nudgeForReps(rowEl) {
+        if (!rowEl) return;
+        const r = rowEl.querySelector('.set-reps');
+        rowEl.classList.add('needs-reps');
+        setTimeout(() => rowEl.classList.remove('needs-reps'), 900);
+        if (r) { try { r.focus(); r.select(); } catch (e) { /* */ } }
     }
 
     // The single place a completion fans out its side effects. The rest timer
@@ -1056,8 +1122,16 @@ if (typeof document !== 'undefined') (function () {
         menuBtn.type = 'button';
         menuBtn.setAttribute('aria-label', 'Exercise options');
         menuBtn.addEventListener('click', () => {
-            if (openMenu.has(exIdx)) openMenu.delete(exIdx); else openMenu.add(exIdx);
-            renderView();
+            // Insert/remove the ⋯ panel node in place — a full re-render here
+            // would blur a focused field and jump scroll under the finger (item 22).
+            const existing = sec.querySelector('.lex-menu-panel');
+            if (openMenu.has(exIdx)) {
+                openMenu.delete(exIdx);
+                if (existing) existing.remove();
+            } else {
+                openMenu.add(exIdx);
+                if (!existing) head.insertAdjacentElement('afterend', renderMenuPanel(exIdx));
+            }
         });
         head.appendChild(menuBtn);
         sec.appendChild(head);
@@ -1278,6 +1352,36 @@ if (typeof document !== 'undefined') (function () {
         return (typeof DAY_LABELS !== 'undefined' && DAY_LABELS[code]) || displayTitle(planDay.cls);
     }
 
+    // Inline two-tap confirm — replaces native confirm(), which blocks the JS
+    // thread and is a browser-automation hazard (item 24). First tap arms the
+    // control (question + ✓/✕); ✓ confirms, ✕ or a 4s timeout cancels.
+    function inlineConfirm(trigger, question, onYes) {
+        if (trigger.dataset.confirming === '1') return; // already armed — ignore re-tap
+        trigger.dataset.confirming = '1';
+        // Inline display (not [hidden]): .logger-start's author `display:block`
+        // beats the UA `[hidden]{display:none}`, so the attribute wouldn't hide it.
+        trigger.style.display = 'none';
+        const box = el('div', 'inline-confirm');
+        box.appendChild(el('span', 'inline-confirm-q', question));
+        const yes = el('button', 'inline-confirm-yes', '✓');
+        yes.type = 'button'; yes.setAttribute('aria-label', 'Confirm');
+        const no = el('button', 'inline-confirm-no', '✕');
+        no.type = 'button'; no.setAttribute('aria-label', 'Cancel');
+        box.appendChild(yes); box.appendChild(no);
+        trigger.insertAdjacentElement('afterend', box);
+        let settled = false;
+        const done = () => {
+            if (settled) return; settled = true;
+            clearTimeout(timer);
+            box.remove();
+            trigger.style.display = '';
+            delete trigger.dataset.confirming;
+        };
+        const timer = setTimeout(done, 4000);
+        yes.addEventListener('click', () => { done(); onYes(); });
+        no.addEventListener('click', done);
+    }
+
     function decorateLoggedPill(date) {
         document.querySelectorAll('#days > .day-card').forEach((card) => {
             if (!card.planDay || card.planDay.evt.date !== date) return;
@@ -1299,9 +1403,10 @@ if (typeof document !== 'undefined') (function () {
                 btn.addEventListener('click', () => {
                     const mode = document.body.classList.contains('mode-home') ? 'home' : 'gym';
                     const label = dayLabelFor(d, mode);
-                    if (!confirm('Start ' + label + '?')) return;
-                    const day = Object.assign({ summary: d.evt.summary }, d.parsed);
-                    startSession(day, mode);
+                    inlineConfirm(btn, 'Start ' + label + '?', () => {
+                        const day = Object.assign({ summary: d.evt.summary }, d.parsed);
+                        startSession(day, mode);
+                    });
                 });
                 card.appendChild(btn);
             }

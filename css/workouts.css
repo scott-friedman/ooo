@@ -539,6 +539,53 @@ body.mode-home .day-card.type-lift:not(.has-bw) .logger-start { display: none; }
     margin-left: auto;
 }
 
+/* ─── Inline two-tap confirm (replaces blocking native confirm()) ──── */
+
+.inline-confirm {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.inline-confirm-q {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--black);
+}
+
+.inline-confirm-yes,
+.inline-confirm-no {
+    flex: 0 0 auto;
+    min-width: 46px;
+    min-height: 46px;
+    font-family: inherit;
+    font-size: 1.15rem;
+    font-weight: 700;
+    line-height: 1;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.inline-confirm-yes { color: var(--white); background: var(--accent); border: none; }
+.inline-confirm-no { color: var(--black); background: transparent; border: 1.5px solid var(--gray-light); }
+.inline-confirm-yes:active,
+.inline-confirm-no:active { filter: brightness(0.94); }
+
+/* Resume bar sits on the accent fill, so flip the palette for contrast. */
+.logger-resume .inline-confirm { margin-top: 0; flex: 1; justify-content: flex-end; }
+.logger-resume .inline-confirm-q { color: var(--white); }
+.logger-resume .inline-confirm-yes { color: var(--accent); background: var(--white); }
+.logger-resume .inline-confirm-no { color: var(--white); background: transparent; border-color: var(--white); }
+
+/* Armed, the discard confirm OWNS the bar: hide the label + Resume button so
+   ✓/✕ never overflow the fixed-width bar off a phone's right edge. */
+.logger-resume:has(.inline-confirm) .logger-resume-label,
+.logger-resume:has(.inline-confirm) .logger-resume-resume { display: none; }
+.logger-resume:has(.inline-confirm) .logger-resume-btns { flex: 1; min-width: 0; }
+
 /* ─── Resume + sync banners (fixed) ──────────────────────────────── */
 
 /* The author display rules below would otherwise beat the UA's [hidden]
@@ -920,6 +967,27 @@ body.mode-home .day-card.type-lift:not(.has-bw) .logger-start { display: none; }
     content: ' AMRAP';
     font-size: 0.6rem;
     color: var(--warm);
+}
+
+/* Focused field: clear ring so it's obvious which number a tap armed for
+   select-all re-entry (item 25). Accent green reads in both themes. */
+.set-field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(111, 191, 135, 0.22);
+}
+
+/* AMRAP type-to-arm nudge: a tap-to-complete on an empty AMRAP field flashes
+   the reps box instead of silently logging the base reps (item 23). */
+.set-row.needs-reps .set-field.set-reps {
+    border-color: var(--warm);
+    box-shadow: 0 0 0 3px rgba(224, 133, 96, 0.28);
+    animation: reps-shake 0.4s ease;
+}
+@keyframes reps-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
 }
 
 /* ─── Footer ─────────────────────────────────────────────────────── */
