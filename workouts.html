@@ -10,8 +10,9 @@
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161616">
     <title>workouts</title>
 
-    <!-- Add-to-home-screen / standalone PWA (item 12). Token is never in the
-         manifest — a standalone launch reads it from localStorage, or prompts. -->
+    <!-- Add-to-home-screen / standalone PWA (item 12). The password-derived
+         slug is never in the manifest — a standalone launch reads it from
+         localStorage, or prompts for the password. -->
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <meta name="mobile-web-app-capable" content="yes">
@@ -38,12 +39,14 @@
         <div class="banner" id="banner" hidden></div>
 
         <section class="token-section" id="token-section" hidden>
-            <p>This page needs the access code from your workouts link
-               (the part after <code>#</code>).</p>
+            <p>Enter the password to load the plan.</p>
             <p class="token-error" id="token-message" hidden></p>
             <form id="token-form">
-                <input type="text" id="token-input" inputmode="text" autocomplete="off"
-                       autocapitalize="off" spellcheck="false" placeholder="access code">
+                <!-- Hidden username gives password managers a stable credential. -->
+                <input type="text" name="username" value="workouts" autocomplete="username"
+                       hidden aria-hidden="true" tabindex="-1">
+                <input type="password" id="token-input" autocomplete="current-password"
+                       autocapitalize="off" spellcheck="false" placeholder="password">
                 <button type="submit">open</button>
             </form>
         </section>
@@ -52,11 +55,12 @@
 
         <footer class="page-footer">
             <span id="fetched-at"></span>
-            <a href="#" id="reset-token">reset access code</a>
+            <a href="#" id="reset-token">forget password</a>
         </footer>
     </main>
 
     <script src="js/workouts.js"></script>
     <script src="js/workout-logger.js"></script>
+    <script src="js/exercise-info.js"></script>
 </body>
 </html>

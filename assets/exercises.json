@@ -1,0 +1,632 @@
+{
+  "meta": {
+    "dataset": "hasaneyldrm/exercises-dataset",
+    "commit": "118e4bd6b14da6df0e36605d7169b65db18389a4",
+    "instructionsLicense": "MIT (dataset instruction text); hand-written entries have gifUrl: null",
+    "gifCopyright": "© Gym visual — https://gymvisual.com/ (hotlinked, not redistributed)"
+  },
+  "aliases": {
+    "RDL": "Romanian Deadlift",
+    "OHP": "Overhead Press",
+    "CGBP": "Close-Grip Bench Press",
+    "Incline DB Press": "Incline DB",
+    "KB Swings": "KB Swing",
+    "Single-Leg RDL": "SL RDL",
+    "Y-T-W Raise": "Prone Y-T-W",
+    "Prone Y-T-W Raise": "Prone Y-T-W",
+    "Hyperextension": "Back Extension",
+    "Inverted Row": "Table Row"
+  },
+  "exercises": {
+    "Bench Press": {
+      "steps": [
+        "Lie flat on a bench with your feet flat on the ground and your back pressed against the bench.",
+        "Grasp the barbell with an overhand grip slightly wider than shoulder-width apart.",
+        "Lift the barbell off the rack and hold it directly above your chest with your arms fully extended.",
+        "Lower the barbell slowly towards your chest, keeping your elbows tucked in.",
+        "Pause for a moment when the barbell touches your chest.",
+        "Push the barbell back up to the starting position by extending your arms.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "pectorals",
+      "secondary": [
+        "triceps",
+        "shoulders"
+      ],
+      "equipment": "barbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0025-EIeI8Vf.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Close-Grip Bench Press": {
+      "steps": [
+        "Lie flat on a bench with your feet flat on the ground and your back pressed against the bench.",
+        "Grasp the barbell with a close grip, slightly narrower than shoulder-width apart.",
+        "Unrack the barbell and lower it slowly towards your chest, keeping your elbows close to your body.",
+        "Pause for a moment when the barbell touches your chest.",
+        "Push the barbell back up to the starting position, fully extending your arms.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "triceps",
+      "secondary": [
+        "chest",
+        "shoulders"
+      ],
+      "equipment": "barbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0030-J6Dx1Mu.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Incline DB": {
+      "steps": [
+        "Set up an incline bench at a 45-degree angle.",
+        "Sit on the bench with your feet flat on the ground and your back pressed firmly against the bench.",
+        "Hold a dumbbell in each hand, palms facing forward, and lift them to shoulder height.",
+        "Slowly lower the dumbbells to the sides of your chest, keeping your elbows at a 90-degree angle.",
+        "Push the dumbbells back up to the starting position, fully extending your arms.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "pectorals",
+      "secondary": [
+        "shoulders",
+        "triceps"
+      ],
+      "equipment": "dumbbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0314-ns0SIbU.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Overhead Press": {
+      "steps": [
+        "Set the bar at upper-chest height in the rack; grip just outside shoulder-width, forearms vertical.",
+        "Unrack with the bar resting on your front shoulders, elbows slightly in front of the bar; brace core and squeeze glutes.",
+        "Press the bar straight up past your face, moving your head back slightly to clear the bar path.",
+        "Lock out overhead with the bar over your mid-foot, shrugging your shoulders up into the bar at the top.",
+        "Lower under control back to your shoulders and repeat."
+      ],
+      "target": "delts",
+      "secondary": [
+        "triceps",
+        "upper back"
+      ],
+      "equipment": "barbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/1457-Kyd9Rz5.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Deadlift": {
+      "steps": [
+        "Stand with your feet shoulder-width apart and the barbell on the ground in front of you.",
+        "Bend your knees and hinge at the hips to lower your torso and grip the barbell with an overhand grip, hands slightly wider than shoulder-width apart.",
+        "Keep your back straight and chest lifted as you drive through your heels to lift the barbell off the ground, extending your hips and knees.",
+        "As you stand up straight, squeeze your glutes and keep your core engaged.",
+        "Lower the barbell back down to the ground by bending at the hips and knees, keeping your back straight.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "hamstrings",
+        "lower back"
+      ],
+      "equipment": "barbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0032-ila4NZS.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Romanian Deadlift": {
+      "steps": [
+        "Stand with your feet shoulder-width apart and your toes pointing forward.",
+        "Hold the barbell with an overhand grip, hands slightly wider than shoulder-width apart.",
+        "Bend at the hips, keeping your back straight and your knees slightly bent.",
+        "Lower the barbell towards the ground, keeping it close to your body.",
+        "Feel the stretch in your hamstrings as you lower the barbell.",
+        "Once you feel a stretch in your hamstrings, push your hips forward and stand up straight.",
+        "Squeeze your glutes at the top of the movement.",
+        "Lower the barbell back down to the starting position and repeat for the desired number of repetitions."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "hamstrings",
+        "lower back"
+      ],
+      "equipment": "barbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0085-wQ2c4XD.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Leg Press": {
+      "steps": [
+        "Adjust the seat and footplate of the sled machine to a comfortable position.",
+        "Sit on the sled machine with your back against the backrest and your feet shoulder-width apart on the footplate.",
+        "Grip the handles on the sides of the seat for stability.",
+        "Push the footplate away from your body by extending your legs, keeping your heels on the footplate.",
+        "Continue pushing until your legs are almost fully extended, but without locking your knees.",
+        "Pause for a moment at the top of the movement, then slowly lower the footplate back towards your body by bending your knees.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "quadriceps",
+        "hamstrings",
+        "calves"
+      ],
+      "equipment": "sled machine",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0739-10Z2DXU.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Seated Leg Curl": {
+      "steps": [
+        "Adjust the machine to fit your body and sit on it with your back against the backrest.",
+        "Place your lower legs under the padded lever, just above your ankles.",
+        "Grasp the handles on the sides of the machine for support.",
+        "Keeping your upper legs stationary, exhale and curl your legs up as far as possible.",
+        "Hold the contracted position for a brief pause as you squeeze your hamstrings.",
+        "Inhale and slowly lower the lever back to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "hamstrings",
+      "secondary": [
+        "calves"
+      ],
+      "equipment": "leverage machine",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0599-Zg3XY7P.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Lat Pulldown": {
+      "steps": [
+        "Adjust the cable pulldown machine so that the seat is at a comfortable height and the knee pad is secured.",
+        "Sit on the seat with your back straight and your feet flat on the ground.",
+        "Grasp the cable bar with an overhand grip, slightly wider than shoulder-width apart.",
+        "Lean back slightly and engage your core.",
+        "Pull the cable bar down towards your chest, squeezing your shoulder blades together.",
+        "Pause for a moment at the bottom of the movement, then slowly release the bar back to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "lats",
+      "secondary": [
+        "biceps",
+        "forearms"
+      ],
+      "equipment": "cable",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0198-RVwzP10.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "DB Row": {
+      "steps": [
+        "Stand with your feet shoulder-width apart, knees slightly bent, and hold a dumbbell in each hand with your palms facing your body.",
+        "Bend forward at the hips, keeping your back straight and your core engaged.",
+        "Let your arms hang straight down towards the floor, with your elbows slightly bent.",
+        "Pull the dumbbells up towards your chest, squeezing your shoulder blades together.",
+        "Pause for a moment at the top, then slowly lower the dumbbells back down to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "upper back",
+      "secondary": [
+        "biceps",
+        "forearms"
+      ],
+      "equipment": "dumbbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0293-BJ0Hz5L.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Seated Row": {
+      "steps": [
+        "Sit on the cable row machine with your feet flat on the footrests and your knees slightly bent.",
+        "Grasp the handles with an overhand grip, keeping your back straight and your shoulders relaxed.",
+        "Pull the handles towards your body, squeezing your shoulder blades together.",
+        "Pause for a moment at the peak of the movement, then slowly release the handles back to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "upper back",
+      "secondary": [
+        "biceps",
+        "forearms"
+      ],
+      "equipment": "cable",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0861-fUBheHs.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Rear Delt Fly": {
+      "steps": [
+        "Stand with your feet shoulder-width apart and hold a dumbbell in each hand.",
+        "Bend your knees slightly and hinge forward at the hips, keeping your back straight.",
+        "Extend your arms straight down in front of you, palms facing each other.",
+        "Keeping a slight bend in your elbows, raise your arms out to the sides until they are parallel to the ground.",
+        "Pause for a moment at the top, then slowly lower your arms back down to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "delts",
+      "secondary": [
+        "trapezius",
+        "rhomboids"
+      ],
+      "equipment": "dumbbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0383-EAs3xL9.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Cable Crossover": {
+      "steps": [
+        "Stand in the middle of a cable machine with your feet shoulder-width apart.",
+        "Hold the handles of the cables with your palms facing down and your arms extended straight out to the sides.",
+        "Keeping your arms straight, bring your hands together in front of your body, crossing them over each other.",
+        "Pause for a moment, then slowly return to the starting position, keeping your arms extended.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "pectorals",
+      "secondary": [
+        "deltoids",
+        "triceps"
+      ],
+      "equipment": "cable",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/1269-UKWTJWR.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Cable Crunch": {
+      "steps": [
+        "Attach a rope handle to a high pulley and kneel down facing away from the machine.",
+        "Hold the rope handle with both hands and place it behind your head, keeping your elbows out to the sides.",
+        "Keeping your hips stationary, flex your waist and crunch your torso down towards your thighs.",
+        "Pause for a moment at the bottom, then slowly return to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "abs",
+      "secondary": [
+        "obliques"
+      ],
+      "equipment": "cable",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0175-WW95auq.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Back Extension": {
+      "steps": [
+        "Adjust the hyperextension bench so that your upper thighs are resting on the pad and your feet are secured.",
+        "Cross your arms over your chest or place your hands behind your head.",
+        "Lower your upper body towards the ground while keeping your back straight.",
+        "Pause for a moment at the bottom, then raise your upper body back up until it is in line with your legs.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "spine",
+      "secondary": [
+        "glutes",
+        "hamstrings"
+      ],
+      "equipment": "body weight",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0489-zhMwOwE.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Squat": {
+      "steps": [
+        "Stand with your feet shoulder-width apart, toes slightly turned out.",
+        "Hold the barbell across your upper back, resting it on your traps or rear delts.",
+        "Engage your core and keep your chest up as you begin to lower your body down.",
+        "Bend at the knees and hips, pushing your hips back and down as if sitting into a chair.",
+        "Lower yourself until your thighs are parallel to the ground or slightly below.",
+        "Keep your knees in line with your toes and your weight in your heels.",
+        "Drive through your heels to stand back up, extending your hips and knees.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "quadriceps",
+        "hamstrings",
+        "calves",
+        "core"
+      ],
+      "equipment": "barbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0043-qXTaZnJ.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Hanging Knee Raise": {
+      "steps": [
+        "Hang from a pull-up bar with your arms fully extended and your palms facing away from you.",
+        "Engage your core muscles and lift your knees towards your chest, bending at the hips and knees.",
+        "Pause for a moment at the top of the movement, squeezing your abs.",
+        "Slowly lower your legs back down to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "abs",
+      "secondary": [
+        "hip flexors"
+      ],
+      "equipment": "assisted",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0011-03lzqwk.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "KB Swing": {
+      "steps": [
+        "Stand with your feet shoulder-width apart, toes pointed slightly outward.",
+        "Hold the kettlebell with both hands in front of your body, arms extended.",
+        "Bend your knees slightly and hinge at the hips, pushing your butt back.",
+        "Swing the kettlebell back between your legs, keeping your arms straight and maintaining a flat back.",
+        "Drive your hips forward and swing the kettlebell up to shoulder height, using the momentum generated by your hips.",
+        "Allow the kettlebell to swing back down between your legs and repeat the movement for the desired number of repetitions."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "hamstrings",
+        "core"
+      ],
+      "equipment": "kettlebell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0549-UHJlbu3.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "SL RDL": {
+      "steps": [
+        "Stand with your feet hip-width apart, holding a dumbbell in your right hand.",
+        "Shift your weight onto your left leg and lift your right foot slightly off the ground.",
+        "Keeping your back straight, hinge forward at the hips and lower the dumbbell towards the ground.",
+        "At the same time, extend your right leg straight behind you, maintaining a slight bend in your left knee.",
+        "Lower the dumbbell until your torso and right leg are parallel to the ground.",
+        "Pause for a moment, then engage your glutes and hamstrings to return to the starting position.",
+        "Repeat for the desired number of repetitions, then switch sides."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "hamstrings",
+        "lower back"
+      ],
+      "equipment": "dumbbell",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/1757-gKozT8X.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Table Row": {
+      "steps": [
+        "Set up a bar at waist height and lie underneath it.",
+        "Grab the bar with an overhand grip, slightly wider than shoulder-width apart.",
+        "Position your body so that your heels are on the ground and your body is straight.",
+        "Pull your chest up towards the bar by squeezing your shoulder blades together.",
+        "Pause for a moment at the top, then slowly lower your body back down to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "upper back",
+      "secondary": [
+        "biceps",
+        "forearms"
+      ],
+      "equipment": "body weight",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/2300-VPPtusI.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Decline Push Up": {
+      "steps": [
+        "Place your hands on the ground slightly wider than shoulder-width apart, with your feet elevated on a stable surface.",
+        "Keep your body in a straight line from head to toe, engaging your core muscles.",
+        "Lower your chest towards the ground by bending your elbows, keeping them close to your body.",
+        "Push through your palms to extend your arms and return to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "pectorals",
+      "secondary": [
+        "triceps",
+        "shoulders"
+      ],
+      "equipment": "body weight",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0279-i5cEhka.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Diamond Push Up": {
+      "steps": [
+        "Start in a high plank position with your hands close together, forming a diamond shape with your thumbs and index fingers.",
+        "Keep your body in a straight line from head to toe, engaging your core and glutes.",
+        "Lower your chest towards the diamond shape formed by your hands, keeping your elbows close to your body.",
+        "Pause for a moment at the bottom, then push yourself back up to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "triceps",
+      "secondary": [
+        "chest",
+        "shoulders"
+      ],
+      "equipment": "body weight",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/0283-soIB2rj.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Glute Bridge": {
+      "steps": [
+        "Lie flat on your back with your knees bent and feet flat on the ground.",
+        "Place your arms by your sides, palms facing down.",
+        "Engage your glutes and core, then lift your hips off the ground until your body forms a straight line from your knees to your shoulders.",
+        "Pause for a moment at the top, squeezing your glutes.",
+        "Slowly lower your hips back down to the starting position.",
+        "Repeat for the desired number of repetitions."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "hamstrings",
+        "core"
+      ],
+      "equipment": "body weight",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/3013-u0cNiij.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "SL Glute Bridge": {
+      "steps": [
+        "Lie on your back with your knees bent and feet flat on the ground.",
+        "Extend one leg straight out in front of you.",
+        "Engage your glutes and lift your hips off the ground, forming a straight line from your knees to your shoulders.",
+        "Hold for a moment at the top, then slowly lower your hips back down to the starting position.",
+        "Repeat for the desired number of repetitions, then switch legs."
+      ],
+      "target": "glutes",
+      "secondary": [
+        "hamstrings",
+        "quadriceps"
+      ],
+      "equipment": "body weight",
+      "gifUrl": "https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/118e4bd6b14da6df0e36605d7169b65db18389a4/videos/3645-rmEukuS.gif",
+      "attribution": "© Gym visual — https://gymvisual.com/"
+    },
+    "Face Pull": {
+      "steps": [
+        "Set a cable pulley (or anchor a band) at upper-chest to eye height and grab the rope with both palms facing in.",
+        "Step back until the cable is taut, arms straight, feet shoulder-width apart.",
+        "Pull the rope toward your face, driving your elbows high and wide until your hands reach your ears.",
+        "At the end, pull the rope apart so your knuckles face behind you — squeeze rear delts and upper back.",
+        "Return to straight arms under control; keep shoulders down away from your ears throughout."
+      ],
+      "target": "rear delts",
+      "secondary": [
+        "traps",
+        "rotator cuff"
+      ],
+      "equipment": "cable (rope) or band",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Plank": {
+      "steps": [
+        "Forearms on the floor, elbows directly under shoulders, legs extended behind you on your toes.",
+        "Brace your abs and squeeze your glutes so your body forms a straight line from head to heels.",
+        "Don’t let the hips sag or pike up; keep your neck neutral, gaze at the floor.",
+        "Breathe steadily and hold for the prescribed time."
+      ],
+      "target": "abs",
+      "secondary": [
+        "glutes",
+        "lower back",
+        "shoulders"
+      ],
+      "equipment": "body weight",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "KB RDL": {
+      "steps": [
+        "Stand with feet hip-width apart, kettlebell held in both hands in front of your thighs.",
+        "With soft knees, hinge at the hips by pushing your butt straight back — the bell slides down close to your legs.",
+        "Lower until you feel a strong hamstring stretch with a flat back (roughly mid-shin).",
+        "Drive your hips forward to stand tall, squeezing your glutes at the top.",
+        "Don’t turn it into a squat — your knee angle should barely change."
+      ],
+      "target": "hamstrings",
+      "secondary": [
+        "glutes",
+        "lower back"
+      ],
+      "equipment": "kettlebell",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Suitcase Carry": {
+      "steps": [
+        "Deadlift the weight up at one side with one hand, like picking up a suitcase.",
+        "Stand tall with shoulders level — don’t lean toward or away from the weight.",
+        "Walk slow, controlled steps for the prescribed distance or time, core braced the whole way.",
+        "Set it down with a flat back, switch hands, and repeat on the other side."
+      ],
+      "target": "obliques",
+      "secondary": [
+        "grip",
+        "traps",
+        "core"
+      ],
+      "equipment": "kettlebell or dumbbell",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Pike Push Up": {
+      "steps": [
+        "From a push-up position, walk your feet toward your hands and lift your hips high into an inverted V.",
+        "Bend your elbows to lower the crown of your head toward the floor between your hands.",
+        "Press back up to the V position, keeping your legs straight and your weight stacked over your shoulders.",
+        "Elevate your feet on a step to make it harder."
+      ],
+      "target": "delts",
+      "secondary": [
+        "triceps",
+        "upper chest"
+      ],
+      "equipment": "body weight",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Banded Push Up": {
+      "steps": [
+        "Loop a resistance band across your upper back and pin an end under each palm.",
+        "Set up in a push-up position: hands slightly wider than shoulders, straight line from head to heels.",
+        "Lower your chest to just above the floor with elbows about 45° from your torso.",
+        "Press up against the band — it’s heaviest at lockout, so stay tight and don’t let your hips sag."
+      ],
+      "target": "pectorals",
+      "secondary": [
+        "triceps",
+        "shoulders"
+      ],
+      "equipment": "band + body weight",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Wall Sit": {
+      "steps": [
+        "Stand with your back flat against a wall and walk your feet out about two feet.",
+        "Slide down until your thighs are parallel to the floor, knees at 90° directly over your ankles.",
+        "Press your lower back into the wall and keep your hands off your thighs.",
+        "Hold for the prescribed time, breathing steadily."
+      ],
+      "target": "quads",
+      "secondary": [
+        "glutes",
+        "calves"
+      ],
+      "equipment": "body weight",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Hollow Hold": {
+      "steps": [
+        "Lie on your back and press your lower back firmly into the floor.",
+        "Raise your shoulders and legs a few inches off the floor, arms extended overhead (or by your sides to make it easier).",
+        "Your body forms a shallow banana shape — the lower back stays glued down the entire time.",
+        "Hold for the prescribed time while breathing; if the lower back arches up, shorten the set."
+      ],
+      "target": "abs",
+      "secondary": [
+        "hip flexors"
+      ],
+      "equipment": "body weight",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Superman": {
+      "steps": [
+        "Lie face down with your arms extended overhead.",
+        "Raise your arms, chest, and legs off the floor together, squeezing your lower back and glutes.",
+        "Pause a beat at the top, then lower with control. Keep your neck neutral — look at the floor."
+      ],
+      "target": "lower back",
+      "secondary": [
+        "glutes",
+        "rear delts"
+      ],
+      "equipment": "body weight",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Sliding Leg Curl": {
+      "steps": [
+        "Lie on your back with your heels on sliders (or a towel on a smooth floor), knees bent, hips bridged up.",
+        "Slide your heels away until your legs are nearly straight, keeping your hips up.",
+        "Pull your heels back toward your butt while holding the bridge — your hamstrings do the work.",
+        "Keep your hips extended for the whole set; letting them sag is the rest position."
+      ],
+      "target": "hamstrings",
+      "secondary": [
+        "glutes",
+        "core"
+      ],
+      "equipment": "sliders or towel + body weight",
+      "gifUrl": null,
+      "attribution": null
+    },
+    "Prone Y-T-W": {
+      "steps": [
+        "Lie face down on the floor (or chest-down on an incline bench) with your arms hanging.",
+        "Y: raise your arms overhead at 45° with thumbs up, squeeze, and lower.",
+        "T: raise your arms straight out to the sides, squeeze your shoulder blades together, and lower.",
+        "W: pull your elbows down and back to form a W, squeeze, and lower. That’s one rep."
+      ],
+      "target": "rear delts",
+      "secondary": [
+        "lower traps",
+        "rotator cuff"
+      ],
+      "equipment": "body weight",
+      "gifUrl": null,
+      "attribution": null
+    }
+  }
+}

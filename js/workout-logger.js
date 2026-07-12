@@ -1265,6 +1265,7 @@ if (typeof document !== 'undefined') (function () {
         const titles = el('div', 'lex-titles');
         const nameRow = el('div', 'lex-name-row');
         nameRow.appendChild(el('span', 'lex-name', ex.plan_name));
+        if (typeof exInfoBtn !== 'undefined') nameRow.appendChild(exInfoBtn(ex.plan_name));
         if (ex.swapped_from) nameRow.appendChild(el('span', 'lex-was', 'was ' + ex.swapped_from));
         if (skipped) nameRow.appendChild(el('span', 'lex-skip-tag', 'skipped'));
         titles.appendChild(nameRow);
@@ -1581,7 +1582,9 @@ if (typeof document !== 'undefined') (function () {
     if (activeSession) showResumeBar();
     flushQueue();
 
-    document.addEventListener('workouts:rendered', decorateCards);
+    // flushQueue on render too: a render right after login is the first moment
+    // sessions queued while logged-out can sync (putOnce reads the token then).
+    document.addEventListener('workouts:rendered', () => { decorateCards(); flushQueue(); });
     window.addEventListener('online', flushQueue);
 
     // Auto-start the rest timer on a WORK-set completion (warmup ramp steps don't rest).

@@ -13,6 +13,7 @@ const assert = require('node:assert');
 const {
     classifySummary, displayTitle, parseWeightTag, parseTLine,
     parseAltSegment, parseBwSegment, parseDescription, tagKind,
+    convertKgToLb, deriveSlug,
 } = require('../js/workouts.js');
 
 test('classifySummary: lift day with duration', () => {
@@ -154,6 +155,41 @@ test('parseDescription: far-future lift day with no T-lines yet', () => {
     assert.strictEqual(p.prose.length, 2);
     assert.strictEqual(p.bw.length, 2);
     assert.strictEqual(p.notes.length, 1);
+});
+
+test('convertKgToLb: kg tokens become rounded pounds', () => {
+    assert.strictEqual(convertKgToLb('KB Swing 24kg 5×10'), 'KB Swing 53 lb 5×10');
+    assert.strictEqual(convertKgToLb('Suitcase Carry 24 kg'), 'Suitcase Carry 53 lb');
+    assert.strictEqual(convertKgToLb('16KG bell'), '35 lb bell');   // case-insensitive
+    assert.strictEqual(convertKgToLb('24.5 kg'), '54 lb');          // decimals round
+    assert.strictEqual(convertKgToLb('two swings 24kg + carry 32kg'),
+        'two swings 53 lb + carry 71 lb');                          // multiple tokens
+});
+
+test('convertKgToLb: leaves non-kg text alone and is idempotent', () => {
+    assert.strictEqual(convertKgToLb('145 lbs (retry)'), '145 lbs (retry)');
+    assert.strictEqual(convertKgToLb('bodyweight + 5 lb'), 'bodyweight + 5 lb');
+    assert.strictEqual(convertKgToLb('10kgs of effort'), '10kgs of effort'); // \b guard
+    assert.strictEqual(convertKgToLb(null), '');
+    const once = convertKgToLb('KB RDL 24kg 3×10');
+    assert.strictEqual(convertKgToLb(once), once);
+});
+
+test('convertKgToLb: converted BW-swap line still parses, no kg survives', () => {
+    const p = parseDescription(convertKgToLb(
+        'BW swap (home): KB Swing 24kg 5×10 + Glute Bridge 3×10 · Plank 3×60s + Suitcase Carry 24kg'));
+    assert.deepStrictEqual(p.bw.map((b) => b.name),
+        ['KB Swing 53 lb', 'Glute Bridge', 'Plank', 'Suitcase Carry 53 lb']);
+    for (const b of p.bw) assert.doesNotMatch(b.name, /kg/i);
+});
+
+test('deriveSlug: deterministic 32-char lowercase hex with fixed vector', async () => {
+    const slug = await deriveSlug('test');
+    // = hex(SHA-256('workouts.scottfriedman.ooo:v1:' + 'test')).slice(0, 32)
+    assert.strictEqual(slug, '8035a3432077ef9aefa744f619a8847d');
+    assert.match(slug, /^[0-9a-f]{32}$/);
+    assert.strictEqual(await deriveSlug('test'), slug);
+    assert.notStrictEqual(await deriveSlug('Test'), slug);
 });
 
 test('tagKind: pill coloring buckets', () => {

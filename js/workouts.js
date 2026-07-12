@@ -3,10 +3,12 @@
  * calendar feed) as phone-legible day cards with a Gym/Home toggle.
  *
  * Data flow: the plan pipeline pushes fitness-plan.json to Cloudflare KV on
- * every update; foobos.net/api/fitness/<token>.json serves it with CORS for
- * this origin. The token arrives once via URL fragment, is stored in
- * localStorage, and is scrubbed from the address bar. It must never be
- * hardcoded here — this repo is public.
+ * every update; foobos.net/api/fitness/<slug>.json serves it with CORS for
+ * this origin. The page is gated by a typed password: the fetch slug is
+ * SHA-256(salt + password), so the password itself never leaves the device
+ * and the slug must never be hardcoded here — this repo is public. A raw
+ * slug can still arrive once via URL fragment (back-compat); either way it
+ * is stored in localStorage and scrubbed from the address bar.
  *
  * Parsing functions are pure and exported for tests/workouts-parser.test.js.
  * Any per-day parse failure falls back to rendering the raw description —
@@ -17,8 +19,22 @@ const API_BASE = 'https://foobos.net/api/fitness/';
 const LS_TOKEN = 'workouts:token';
 const LS_MODE = 'workouts:mode';
 const LS_CACHE = 'workouts:planCache';
+const LS_AUTHV = 'workouts:authv';
+const SLUG_SALT = 'workouts.scottfriedman.ooo:v1:';
 
 // ─── Parsing (pure) ─────────────────────────────────────────────────
+
+/**
+ * The page displays pounds only. Plan text carries kg on some home
+ * kettlebell lines; convert every "24kg"-style token to "53 lb".
+ * Output contains no "kg", so re-applying is a no-op.
+ */
+function convertKgToLb(text) {
+    return String(text == null ? '' : text).replace(
+        /(\d+(?:\.\d+)?)\s*kg\b/gi,
+        (m, n) => Math.round(parseFloat(n) * 2.20462) + ' lb'
+    );
+}
 
 /**
  * Classify an event summary like "A2 BENCH DAY (40-55 min)",
@@ -157,6 +173,15 @@ function el(tag, className, text) {
     return node;
 }
 
+/** ⓘ button that opens the exercise how-to sheet (handled in exercise-info.js). */
+function exInfoBtn(name) {
+    const btn = el('button', 'exinfo-btn', 'ⓘ');
+    btn.type = 'button';
+    btn.dataset.exname = name;
+    btn.setAttribute('aria-label', 'How to: ' + name);
+    return btn;
+}
+
 function localDateStr(d) {
     const pad = (n) => (n < 10 ? '0' + n : '' + n);
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -177,6 +202,7 @@ function renderExerciseRow(ex, alt) {
 
     const primary = el('div', 'ex-variant ex-primary');
     primary.appendChild(el('span', 'ex-name', ex.name));
+    primary.appendChild(exInfoBtn(ex.name));
     const line2 = el('span', 'ex-line2');
     line2.appendChild(el('b', 'ex-weight', ex.weight));
     line2.appendChild(el('span', 'ex-reps', ex.reps));
@@ -189,6 +215,7 @@ function renderExerciseRow(ex, alt) {
         // Equipment-taken alternate: hidden until the alt button toggles it in.
         const altBox = el('div', 'ex-variant ex-alt');
         altBox.appendChild(el('span', 'ex-name', alt.name));
+        altBox.appendChild(exInfoBtn(alt.name));
         const altLine2 = el('span', 'ex-line2');
         altLine2.appendChild(el('b', 'ex-weight', alt.weight));
         altLine2.appendChild(el('span', 'ex-reps', alt.reps));
@@ -221,6 +248,7 @@ function renderBwBlock(bw) {
     for (const item of bw) {
         const li = el('li', 'bw-row');
         li.appendChild(el('span', 'bw-name', item.name));
+        li.appendChild(exInfoBtn(item.name));
         if (item.rx) li.appendChild(el('span', 'bw-rx', item.rx));
         ul.appendChild(li);
     }
@@ -336,7 +364,14 @@ function renderPlan(plan, fetchedAt, stale) {
     meta.textContent = metaText;
 
     const todayStr = localDateStr(new Date());
-    const events = (plan.events || []).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    // Pounds-only chokepoint: fresh fetches, the offline cache path, and the
+    // raw-fallback <pre> all flow through here.
+    const events = (plan.events || [])
+        .map((evt) => Object.assign({}, evt, {
+            summary: convertKgToLb(evt.summary),
+            description: convertKgToLb(evt.description),
+        }))
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
     for (const evt of events) {
         if (!evt.date) continue;
         daysEl.appendChild(renderDayCard(evt, todayStr));
@@ -379,6 +414,19 @@ function setMode(mode) {
 
 // ─── Token + fetch ──────────────────────────────────────────────────
 
+/**
+ * Password → fetch slug: hex(SHA-256(salt + password)), first 32 chars.
+ * Pure and exported for tests. Requires a secure context (crypto.subtle).
+ */
+async function deriveSlug(password) {
+    const bytes = new TextEncoder().encode(SLUG_SALT + password);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+        .slice(0, 32);
+}
+
 function captureToken() {
     const fragment = location.hash.replace(/^#/, '').trim();
     if (fragment) {
@@ -397,9 +445,6 @@ function showTokenForm(message) {
     const msg = document.getElementById('token-message');
     msg.textContent = message || '';
     msg.hidden = !message;
-    let stored = null;
-    try { stored = localStorage.getItem(LS_TOKEN); } catch (e) { /* private mode */ }
-    if (stored) document.getElementById('token-input').value = stored;
 }
 
 function readCache() {
@@ -419,7 +464,7 @@ async function loadPlan() {
     try {
         const res = await fetch(API_BASE + encodeURIComponent(token) + '.json');
         if (res.status === 404) {
-            showTokenForm('token not recognized — check the link and paste it again');
+            showTokenForm('wrong password — try again');
             return;
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -442,6 +487,17 @@ async function loadPlan() {
 // ─── Init ───────────────────────────────────────────────────────────
 
 function init() {
+    // One-time auth migration: v2 replaced the shared access code with a
+    // password-derived slug. Stored pre-v2 tokens point devices at the old
+    // slug, so wipe once and let the password form take over. Runs before
+    // captureToken() so a #<raw-slug> link still wins.
+    try {
+        if (localStorage.getItem(LS_AUTHV) !== '2') {
+            localStorage.removeItem(LS_TOKEN);
+            localStorage.setItem(LS_AUTHV, '2');
+        }
+    } catch (e) { /* private mode */ }
+
     let mode = null;
     try { mode = localStorage.getItem(LS_MODE); } catch (e) { /* private mode */ }
     setMode(mode === 'home' ? 'home' : 'gym');
@@ -450,11 +506,16 @@ function init() {
         btn.addEventListener('click', () => setMode(btn.dataset.mode));
     }
 
-    document.getElementById('token-form').addEventListener('submit', (e) => {
+    document.getElementById('token-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const value = document.getElementById('token-input').value.trim();
         if (!value) return;
-        try { localStorage.setItem(LS_TOKEN, value); } catch (err) { /* private mode */ }
+        if (!(typeof crypto !== 'undefined' && crypto.subtle)) {
+            showTokenForm('logging in needs a secure connection (https)');
+            return;
+        }
+        const slug = await deriveSlug(value);
+        try { localStorage.setItem(LS_TOKEN, slug); } catch (err) { /* private mode */ }
         loadPlan();
     });
 
@@ -471,6 +532,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         classifySummary, displayTitle, parseWeightTag, parseTLine,
         parseAltSegment, parseBwSegment, parseDescription, tagKind,
+        convertKgToLb, deriveSlug,
     };
 }
 
