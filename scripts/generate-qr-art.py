@@ -74,6 +74,57 @@ def control_image(url, border):
     return canvas
 
 
+def module_grid(url, border):
+    """QR matrix plus each module's center point in X3 (eink) pixel space.
+
+    Mirrors control_image() geometry exactly: the control QR is box-scaled,
+    centered on GEN_SIZE, and eink_treatment() scales GEN_SIZE -> X3_PORTRAIT
+    uniformly (same aspect), so one linear factor maps between the spaces."""
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_H, border=border)
+    qr.add_data(url)
+    qr.make(fit=True)
+    mat = [[bool(v) for v in row] for row in qr.modules]
+    n = len(mat) + 2 * border
+    box = GEN_SIZE[0] // n
+    ox = (GEN_SIZE[0] - n * box) // 2
+    oy = (GEN_SIZE[1] - n * box) // 2
+    k = X3_PORTRAIT[0] / GEN_SIZE[0]
+    centers = [
+        (r, c, (ox + (border + c + 0.5) * box) * k, (oy + (border + r + 0.5) * box) * k)
+        for r in range(len(mat)) for c in range(len(mat))
+    ]
+    return mat, centers, box * k
+
+
+def repair_image(eink, url, border, target_hits=6):
+    """Stamp minimal correcting dots on modules where the art disagrees with
+    the code, escalating dot size until the decode score clears target_hits.
+    At small radii the dots read as print grain, not as a QR grid."""
+    from PIL import ImageDraw
+
+    mat, centers, mbox = module_grid(url, border)
+    img = eink.convert("L")
+    w = max(2, int(mbox * 0.3))
+    best_hits = decode_score(img, url)
+    if best_hits >= target_hits:
+        return img, 0.0, best_hits
+    for rad in (2.0, 2.8, 3.6, 4.4):
+        arr = np.asarray(img)
+        d = ImageDraw.Draw(img)
+        stamped = 0
+        for r, c, x, y in centers:
+            dark = mat[r][c]
+            patch = arr[int(y - w):int(y + w), int(x - w):int(x + w)]
+            mean = patch.mean() if patch.size else 255
+            if (dark and mean > 100) or (not dark and mean < 155):
+                d.ellipse([x - rad, y - rad, x + rad, y + rad], fill=0 if dark else 255)
+                stamped += 1
+        best_hits = decode_score(img, url)
+        if best_hits >= target_hits:
+            break
+    return img, rad, best_hits
+
+
 def eink_treatment(img):
     """What the X3 does to a picture: grayscale, 528px, pure 1-bit dither."""
     g = ImageOps.autocontrast(img.convert("L"))
@@ -179,6 +230,12 @@ def main():
                 eink = eink_treatment(img)
                 hits = decode_score(eink, args.url)
                 tag = f"{theme}-cs{scale}-s{seed}"
+                if hits < args.min_hits:
+                    # Salvage attempt: surgically pin disagreeing modules.
+                    eink, rad, hits = repair_image(eink, args.url, args.border,
+                                                   target_hits=max(args.min_hits, 6))
+                    if hits >= args.min_hits:
+                        tag += f"-repaired{rad}"
                 if hits >= args.min_hits:
                     kept += 1
                     img.save(args.out / f"keep-{tag}-color.png")
