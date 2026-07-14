@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-097VQD41F8"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-097VQD41F8');
+    </script>
+    <title>links | scott friedman</title>
+
+    <meta name="description" content="quicklinks">
+    <!-- Unlisted utility page (QR landing) - keep out of search results -->
+    <meta name="robots" content="noindex">
+
+    <!--
+      QR LANDING / QUICKLINKS HUB
+      The Xteink X3 sleep-screen QR codes encode https://scottfriedman.ooo/x
+      and never need to change. To change where a scan leads, edit this file:
+
+        * Redirect mode (current): REDIRECT_URL below is set -> instant forward.
+        * Hub mode: set REDIRECT_URL = null, add <li> links to the list below,
+          and delete the <noscript> refresh fallback.
+
+      Preview without redirecting: https://scottfriedman.ooo/x?stay
+    -->
+    <script>
+      const REDIRECT_URL = 'https://apps.apple.com/us/app/foobos/id6760267787';
+      const stay = new URLSearchParams(location.search).has('stay');
+      if (REDIRECT_URL && !stay) {
+        document.documentElement.classList.add('redirecting');
+        gtag('event', 'qr_redirect', { transport_type: 'beacon', destination: REDIRECT_URL });
+        setTimeout(function () { location.replace(REDIRECT_URL); }, 150);
+      }
+    </script>
+    <noscript>
+      <meta http-equiv="refresh" content="0;url=https://apps.apple.com/us/app/foobos/id6760267787">
+    </noscript>
+
+    <style>
+      :root {
+        --black: #1a1a1a;
+        --gray: #666;
+        --white: #fafafa;
+        --accent: #2d5a3d;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: 'Courier New', Courier, monospace;
+        background: var(--white);
+        color: var(--black);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      main { max-width: 26rem; width: 100%; }
+      h1 { font-size: 1.1rem; font-weight: normal; margin-bottom: 1.5rem; }
+      ul { list-style: none; }
+      li + li { margin-top: 0.75rem; }
+      a {
+        display: block;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--black);
+        color: var(--black);
+        text-decoration: none;
+      }
+      a:hover, a:focus { background: var(--accent); color: var(--white); border-color: var(--accent); }
+      .note { margin-top: 2rem; color: var(--gray); font-size: 0.8rem; }
+      .redirect-note { display: none; color: var(--gray); }
+      .redirect-note a { display: inline; border: none; padding: 0; color: var(--accent); text-decoration: underline; }
+      html.redirecting main > :not(.redirect-note) { display: none; }
+      html.redirecting .redirect-note { display: block; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>scott friedman &mdash; links</h1>
+        <ul>
+            <li><a href="https://apps.apple.com/us/app/foobos/id6760267787">foobos on the app store &rarr;</a></li>
+        </ul>
+        <p class="note">you probably got here by scanning a small screen. neat, right?</p>
+        <p class="redirect-note">opening <a href="https://apps.apple.com/us/app/foobos/id6760267787">foobos on the app store</a>&hellip;</p>
+    </main>
+</body>
+</html>
